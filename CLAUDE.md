@@ -60,17 +60,18 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+just test    # node --test over test/*.test.mjs
+just serve   # static server on http://localhost:8737/
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Static single-page app, no build step, no libraries, served by GitHub Pages from a PUBLIC repo.
+`model.js` is a pure reducer from an event log to state (shared by the app and the tests).
+`app.js` stores the events in IndexedDB and renders the UI. A backup file is the event log
+itself. No user data goes into this repo, ever. The design rulings are in seeds
+(`tasket-lmj`, `tasket-lu1`, `tasket-232`, `tasket-tht`).
 
 ## Conventions & Patterns
 
