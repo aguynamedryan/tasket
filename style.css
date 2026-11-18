@@ -55,10 +55,10 @@ input, textarea, select { font: inherit; }
 /* The grid: one row per project, one fixed-width cell per item, so the
    vertical lines line up down the page like spreadsheet columns. */
 *, *::before, *::after { box-sizing: border-box; }
-:root { --cell: 12rem; }
+:root { --cell: 12rem; } /* app.js sets the real width on #grid */
 .grid { border-top: 1px solid var(--line); border-left: 1px solid var(--line); overflow-x: auto; background: var(--panel); }
 .row {
-  display: grid; grid-template-columns: 11rem 1fr; min-width: max-content;
+  display: grid; grid-template-columns: 13rem 1fr; /* 13rem = PROJECT_COLUMN_REM in app.js */ min-width: max-content;
   border-bottom: 1px solid var(--line); background: var(--panel);
 }
 .row.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
@@ -86,7 +86,7 @@ input, textarea, select { font: inherit; }
 .items.drop-end { background-color: #eef2fd; }
 
 .card {
-  position: relative; flex: none; width: var(--cell); padding: 0.45rem 1.6rem 1.1rem 0.55rem;
+  position: relative; flex: none; width: var(--cell); padding: 0.45rem 3.6rem 0.45rem 0.55rem;
   background-color: transparent; cursor: pointer;
 }
 .card.first { font-weight: 600; }
@@ -100,7 +100,7 @@ input, textarea, select { font: inherit; }
 .card.drop-block { outline: 2px dashed var(--accent); outline-offset: -3px; background-color: #eef2fd; }
 .card.drop-refused { outline: 2px dashed var(--overdue); outline-offset: -3px; }
 .card.drop-block::after, .card.drop-refused::after {
-  content: attr(data-drop-label); position: absolute; left: 50%; bottom: 0.2rem; transform: translateX(-50%);
+  content: attr(data-drop-label); position: absolute; left: 50%; bottom: 0.1rem; transform: translateX(-50%);
   font-size: 0.72rem; font-weight: 700; color: white; background: var(--accent);
   padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; pointer-events: none;
 }
@@ -125,7 +125,7 @@ input, textarea, select { font: inherit; }
 .card:hover .finish { color: var(--muted); }
 .finish:hover { color: #1a8a3a !important; }
 
-.age { position: absolute; bottom: 0.2rem; right: 0.35rem; font-size: 0.72rem; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.age { position: absolute; top: 0.5rem; right: 1.7rem; font-size: 0.72rem; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .add-item { flex: none; width: var(--cell); display: flex; }
 .add-item input {

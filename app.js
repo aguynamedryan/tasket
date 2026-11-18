@@ -127,12 +127,30 @@ function renderDated() {
 
 function renderGrid() {
   const hideEmpty = localStorage.getItem(HIDE_EMPTY_KEY) === "1";
-  const rows = state.projectOrder
+  const projects = state.projectOrder
     .map((id) => state.projects.get(id))
-    .filter((p) => !hideEmpty || p.itemIds.length > 0)
-    .map(renderRow);
-  document.getElementById("grid").replaceChildren(...rows);
+    .filter((p) => !hideEmpty || p.itemIds.length > 0);
+  const grid = document.getElementById("grid");
+  grid.replaceChildren(...projects.map(renderRow));
+  // Columns: the fullest row's items, plus its "+" cell.
+  grid.dataset.columns = Math.max(1, ...projects.map((p) => p.itemIds.length + 1));
+  sizeColumns();
 }
+
+// Split the grid's free width evenly across the columns, but never make a
+// column narrower than MIN_CELL_REM; below that the grid scrolls sideways.
+const MIN_CELL_REM = 12;
+const PROJECT_COLUMN_REM = 13;
+
+function sizeColumns() {
+  const grid = document.getElementById("grid");
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const free = grid.clientWidth - PROJECT_COLUMN_REM * rem;
+  const cell = Math.max(MIN_CELL_REM * rem, Math.floor(free / Number(grid.dataset.columns || 1)));
+  grid.style.setProperty("--cell", `${cell}px`);
+}
+
+window.addEventListener("resize", sizeColumns);
 
 function renderRow(p) {
   const cards = p.itemIds.map((id, i) => renderCard(state.items.get(id), i));
