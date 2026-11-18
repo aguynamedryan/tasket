@@ -54,6 +54,7 @@ let state = M.emptyState();
 
 // Apply first (so a bad event never reaches storage), then store.
 async function emit(...newEvents) {
+  await ready;
   const next = M.replay([...events, ...newEvents]);
   await appendEvents(db, newEvents);
   events.push(...newEvents);
@@ -148,7 +149,12 @@ function renderRow(p) {
   items.addEventListener("drop", (e) => onItemDrop(e, p.id));
 
   const name = h("div", { class: "project", draggable: "true", title: "Drag to reorder. Double-click to rename." },
-    h("span", { class: "grip" }, "⋮⋮"), h("span", { class: "project-name" }, p.name));
+    h("span", { class: "grip" }, "⋮⋮"), h("span", { class: "project-name" }, p.name),
+    h("button", { class: "to-bottom", title: "Send this project to the bottom", onclick: (e) => {
+      e.stopPropagation();
+      if (state.projectOrder.at(-1) !== p.id)
+        emit(ev("project.moved", { projectId: p.id, index: state.projectOrder.length }));
+    } }, "⤓"));
   name.addEventListener("dblclick", () => renameProject(p));
   name.addEventListener("dragstart", (e) => { drag = { kind: "project", id: p.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.name); });
   name.addEventListener("dragend", endDrag);
@@ -178,7 +184,7 @@ function renderCard(it, index) {
   );
   card.addEventListener("dragstart", (e) => {
     drag = { kind: "item", id: it.id };
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.effectAllowed = "linkMove"; // move = reorder, link = make a blocker
     e.dataTransfer.setData("text/plain", it.text);
     card.classList.add("dragging");
   });
@@ -220,9 +226,13 @@ let persisted = false;
 
 let drag = null;
 
+const DROP_MARKS = ["drop-before", "drop-after", "drop-end", "drop-block", "drop-refused"];
+
 function clearDropMarks() {
-  for (const el of document.querySelectorAll(".drop-before, .drop-after, .drop-end"))
-    el.classList.remove("drop-before", "drop-after", "drop-end");
+  for (const el of document.querySelectorAll(DROP_MARKS.map((c) => `.${c}`).join(", "))) {
+    el.classList.remove(...DROP_MARKS);
+    delete el.dataset.dropLabel;
+  }
 }
 
 function endDrag() {
@@ -231,17 +241,38 @@ function endDrag() {
   for (const el of document.querySelectorAll(".dragging")) el.classList.remove("dragging");
 }
 
-// Where in the row would the dragged item land? Returns { index, card, after }.
+// The middle half of a card is the "blocks this" zone. Its outer quarters,
+// and the gaps between cards, place the dragged item in the row.
+const BLOCK_ZONE = [0.25, 0.75];
+
+// Where would the dragged item land?
+// Returns { block: card } to make the dragged item block that card's item,
+// or { index, card, after } to move it to that position in the row.
 function itemDropTarget(e, projectId) {
   const cards = [...document.querySelectorAll(`.items[data-project-id="${projectId}"] .card`)]
     .filter((c) => c.dataset.itemId !== drag.id);
   for (let i = 0; i < cards.length; i++) {
     const r = cards[i].getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (inside) {
+      const frac = (e.clientX - r.left) / r.width;
+      if (frac > BLOCK_ZONE[0] && frac < BLOCK_ZONE[1]) return { block: cards[i] };
+      return frac <= BLOCK_ZONE[0]
+        ? { index: i, card: cards[i], after: false }
+        : { index: i + 1, card: cards[i], after: true };
+    }
     const sameLine = e.clientY >= r.top && e.clientY <= r.bottom;
-    if ((sameLine && e.clientX < r.left + r.width / 2) || e.clientY < r.top)
+    if ((sameLine && e.clientX < r.left) || e.clientY < r.top)
       return { index: i, card: cards[i], after: false };
   }
   return { index: cards.length, card: cards.at(-1), after: true };
+}
+
+// Why the dragged item cannot block this one, or null if it can.
+function blockRefusal(blockerId, blockedId) {
+  if (state.blocks.has(`${blockerId}>${blockedId}`)) return "already blocks this";
+  if (M.wouldCycle(state, blockerId, blockedId)) return "would make a loop";
+  return null;
 }
 
 function onItemDragOver(e, projectId) {
@@ -250,21 +281,34 @@ function onItemDragOver(e, projectId) {
   e.stopPropagation();
   clearDropMarks();
   const t = itemDropTarget(e, projectId);
-  if (t.card) t.card.classList.add(t.after ? "drop-after" : "drop-before");
-  else e.currentTarget.classList.add("drop-end");
+  if (t.block) {
+    const refusal = blockRefusal(drag.id, t.block.dataset.itemId);
+    t.block.classList.add(refusal ? "drop-refused" : "drop-block");
+    t.block.dataset.dropLabel = refusal ?? "blocks this";
+    e.dataTransfer.dropEffect = refusal ? "none" : "link";
+  } else {
+    e.dataTransfer.dropEffect = "move";
+    if (t.card) t.card.classList.add(t.after ? "drop-after" : "drop-before");
+    else e.currentTarget.classList.add("drop-end");
+  }
 }
 
 function onItemDrop(e, projectId) {
   if (drag?.kind !== "item") return;
   e.preventDefault();
   e.stopPropagation();
-  const { index } = itemDropTarget(e, projectId);
-  const it = state.items.get(drag.id);
-  const current = state.projects.get(it.projectId).itemIds.indexOf(it.id);
+  const t = itemDropTarget(e, projectId);
   const id = drag.id;
   endDrag();
-  if (it.projectId === projectId && current === index) return;
-  emit(ev("item.moved", { itemId: id, projectId, index }));
+  if (t.block) {
+    const blockedId = t.block.dataset.itemId;
+    if (!blockRefusal(id, blockedId)) emit(ev("block.added", { blockerId: id, blockedId }));
+    return;
+  }
+  const it = state.items.get(id);
+  const current = state.projects.get(it.projectId).itemIds.indexOf(it.id);
+  if (it.projectId === projectId && current === t.index) return;
+  emit(ev("item.moved", { itemId: id, projectId, index: t.index }));
 }
 
 function projectDropIndex(e, row) {
@@ -409,6 +453,7 @@ restoreFile.addEventListener("change", async () => {
   const file = restoreFile.files[0];
   restoreFile.value = "";
   if (!file) return;
+  await ready; // the database may still be opening
   let backup;
   try {
     backup = M.parseBackup(await file.text());
@@ -439,4 +484,6 @@ async function start() {
   render();
 }
 
-start().catch(showError);
+// Everything that touches the database waits for this.
+const ready = start();
+ready.catch(showError);

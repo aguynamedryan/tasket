@@ -6,6 +6,7 @@ A basket of tasks. A small to-do list that runs entirely in your browser.
 - Finish an item with ✓. It leaves the row and appears under "Recently finished", where you can reopen it.
 - An item can have a fixed due date. Dated items are shown at the top of the page, soonest first, in strong colours.
 - An item can wait on another item, in any project. It is dimmed until the item it waits on is finished.
+- To make one item block another, drag it onto the middle of the other item. The target says "blocks this". Drop near a card's edge instead to move the item next to it.
 - Each item shows how many days it has been open.
 
 Click an item to edit its text, set a due date, or add a blocker. Double-click a project name to rename it, or drag it to reorder the projects.
