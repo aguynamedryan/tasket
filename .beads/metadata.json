@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "tasket",
+  "project_id": "843c13e4-4a89-4f5f-8e55-a2a655a2c4d7"
+}
