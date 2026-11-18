@@ -4,7 +4,7 @@ title: 'Hosting: GitHub Pages, opened in Chrome'
 status: captured
 type: decision
 created_at: 2026-11-18T22:03:16.921218+00:00
-updated_at: 2026-11-18T22:03:27.130308+00:00
+updated_at: 2026-11-18T22:05:41.223873+00:00
 relationships:
   - target_id: tasket-xc4
     rel_type: questioned-by
@@ -25,3 +25,7 @@ Three options were offered: a localhost server on the Mac started by launchd, an
 - No to-do data may go into the repo. The Google Sheet's contents come into the app through an in-app import, not through a committed file.
 - Run `gitleaks` before the repo is made public.
 - Nothing has been pushed. Ryan decides when to create the GitHub repo and push.
+
+RULED 2026-11-18: the repo is public, under the GitHub account aguynamedryan, with the MIT license. Ryan: "public is fine, license is MIT, repo under aguynamedryan".
+
+UPDATE 2026-11-18: the sheet does not come in through a CSV import in the app. It comes in through Restore, as a backup file made from the sheet. See \[[tasket-tht]\].
