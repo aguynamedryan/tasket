@@ -70,12 +70,14 @@ input, textarea, select { font: inherit; }
 }
 .grip { color: var(--line); font-size: 0.8em; padding-top: 0.15em; }
 .project:hover .grip { color: var(--muted); }
-.to-bottom {
-  position: absolute; top: 0.3rem; right: 0.2rem; padding: 0 0.3rem; font-size: 0.9rem;
+.to-top, .to-bottom {
+  position: absolute; right: 0.1rem; padding: 0 0.3rem; font-size: 1.15rem; line-height: 1.1;
   border: none; background: none; color: transparent;
 }
-.project:hover .to-bottom { color: var(--muted); }
-.to-bottom:hover { color: var(--accent) !important; }
+.to-top { top: 0.3rem; }
+.to-bottom { top: 1.6rem; }
+.project:hover .to-top, .project:hover .to-bottom { color: var(--muted); }
+.to-top:hover, .to-bottom:hover { color: var(--accent) !important; }
 .items {
   display: flex; flex-wrap: nowrap; align-items: stretch; min-height: 2.2rem;
   background-image: repeating-linear-gradient(to right,

@@ -7,6 +7,7 @@ const DB_NAME = "tasket";
 const STORE = "events";
 const LAST_BACKUP_KEY = "tasket.lastBackupAt";
 const HIDE_EMPTY_KEY = "tasket.hideEmpty";
+const TOOLTIPS_KEY = "tasket.tooltips"; // "0" = off; on by default
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -80,6 +81,7 @@ function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
+    if (k === "title" && localStorage.getItem(TOOLTIPS_KEY) === "0") continue;
     if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "dataset") Object.assign(el.dataset, v);
     else el.setAttribute(k, v === true ? "" : v);
@@ -150,6 +152,10 @@ function renderRow(p) {
 
   const name = h("div", { class: "project", draggable: "true", title: "Drag to reorder. Double-click to rename." },
     h("span", { class: "grip" }, "⋮⋮"), h("span", { class: "project-name" }, p.name),
+    h("button", { class: "to-top", title: "Send this project to the top", onclick: (e) => {
+      e.stopPropagation();
+      if (state.projectOrder[0] !== p.id) emit(ev("project.moved", { projectId: p.id, index: 0 }));
+    } }, "⤒"),
     h("button", { class: "to-bottom", title: "Send this project to the bottom", onclick: (e) => {
       e.stopPropagation();
       if (state.projectOrder.at(-1) !== p.id)
@@ -429,6 +435,12 @@ document.getElementById("add-project").addEventListener("submit", (e) => {
   emit(ev("project.added", { projectId: M.newId(), name }));
 });
 
+const tooltips = document.getElementById("tooltips");
+tooltips.addEventListener("change", () => {
+  localStorage.setItem(TOOLTIPS_KEY, tooltips.checked ? "1" : "0");
+  render();
+});
+
 const hideEmpty = document.getElementById("hide-empty");
 hideEmpty.addEventListener("change", () => {
   localStorage.setItem(HIDE_EMPTY_KEY, hideEmpty.checked ? "1" : "0");
@@ -481,6 +493,7 @@ async function start() {
   events = await loadEvents(db);
   state = M.replay(events);
   hideEmpty.checked = localStorage.getItem(HIDE_EMPTY_KEY) === "1";
+  tooltips.checked = localStorage.getItem(TOOLTIPS_KEY) !== "0";
   render();
 }
 

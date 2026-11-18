@@ -9,7 +9,7 @@ A basket of tasks. A small to-do list that runs entirely in your browser.
 - To make one item block another, drag it onto the middle of the other item. The target says "blocks this". Drop near a card's edge instead to move the item next to it.
 - Each item shows how many days it has been open.
 
-Click an item to edit its text, set a due date, or add a blocker. Double-click a project name to rename it, or drag it to reorder the projects.
+Click an item to edit its text, set a due date, or add a blocker. Double-click a project name to rename it. Drag it to reorder the projects, or hover over it and click ⤒ or ⤓ to send it to the top or the bottom.
 
 ## Your data
 
