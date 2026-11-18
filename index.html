@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tasket</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>tasket</h1>
+    <div class="tools">
+      <label class="toggle"><input type="checkbox" id="hide-empty"> hide empty projects</label>
+      <button id="backup">Backup</button>
+      <button id="restore">Restore…</button>
+      <input type="file" id="restore-file" accept="application/json,.json" hidden>
+      <span id="backup-age" class="backup-age"></span>
+    </div>
+  </header>
+
+  <main>
+    <div id="error" class="error" hidden></div>
+    <section id="dated" class="dated" aria-label="Fixed dates"></section>
+    <section id="grid" class="grid" aria-label="Projects"></section>
+    <form id="add-project" class="add-project">
+      <input name="name" placeholder="New project" autocomplete="off">
+      <button>Add project</button>
+    </form>
+    <details id="finished" class="finished">
+      <summary>Recently finished</summary>
+      <ul></ul>
+    </details>
+  </main>
+
+  <footer id="status" class="status"></footer>
+
+  <dialog id="editor">
+    <form method="dialog" class="editor">
+      <label>Item <textarea name="text" rows="3"></textarea></label>
+      <div class="row">
+        <label>Fixed due date <input type="date" name="due"></label>
+        <button type="button" data-act="clear-due">No date</button>
+      </div>
+      <div class="block-list">
+        <div><strong>Waiting on</strong> <ul data-list="blockers"></ul></div>
+        <label>Add a blocker <select name="add-blocker"></select></label>
+        <div><strong>Blocks</strong> <ul data-list="blocking"></ul></div>
+      </div>
+      <div class="row actions">
+        <button type="button" data-act="remove" class="danger">Delete item</button>
+        <span class="spacer"></span>
+        <button type="button" data-act="finish">Finish</button>
+        <button value="cancel">Cancel</button>
+        <button value="save" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
