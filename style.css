@@ -56,7 +56,8 @@ input, textarea, select { font: inherit; }
    vertical lines line up down the page like spreadsheet columns. */
 *, *::before, *::after { box-sizing: border-box; }
 :root { --cell: 12rem; } /* app.js sets the real width on #grid */
-.grid { border-top: 1px solid var(--line); border-left: 1px solid var(--line); overflow-x: auto; background: var(--panel); }
+.grid { border-top: 1px solid var(--line); border-left: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; background: var(--panel); }
+/* overflow-y: hidden keeps the grid from becoming a second vertical scroll area inside the page. */
 .row {
   display: grid; grid-template-columns: 13rem 1fr; /* 13rem = PROJECT_COLUMN_REM in app.js */ min-width: max-content;
   border-bottom: 1px solid var(--line); background: var(--panel);
@@ -64,7 +65,7 @@ input, textarea, select { font: inherit; }
 .row.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
 .row.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .project {
-  position: relative; display: flex; align-items: flex-start; gap: 0.35rem; padding: 0.5rem 1.6rem 0.5rem 0.5rem;
+  position: relative; display: flex; align-items: flex-start; gap: 0.35rem; padding: 0.5rem 0.5rem 0.5rem 0.5rem;
   font-weight: 600; border-right: 2px solid var(--line); cursor: grab; user-select: none;
   overflow-wrap: anywhere; position: sticky; left: 0; background: var(--panel); z-index: 1;
 }
@@ -72,11 +73,11 @@ input, textarea, select { font: inherit; }
 .project:hover .grip { color: var(--muted); }
 .to-top, .to-bottom {
   position: absolute; right: 0.1rem; padding: 0 0.3rem; font-size: 1.15rem; line-height: 1.1;
-  border: none; background: none; color: transparent;
+  border: none; background: var(--panel); color: var(--muted); visibility: hidden;
 }
-.to-top { top: 0.3rem; }
-.to-bottom { top: 1.6rem; }
-.project:hover .to-top, .project:hover .to-bottom { color: var(--muted); }
+.to-top, .to-bottom { top: 0.35rem; }
+.to-top { right: 1.6rem; }
+.project:hover .to-top, .project:hover .to-bottom { visibility: visible; }
 .to-top:hover, .to-bottom:hover { color: var(--accent) !important; }
 .items {
   display: flex; flex-wrap: nowrap; align-items: stretch; min-height: 2.2rem;
