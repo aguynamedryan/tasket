@@ -4,7 +4,7 @@ title: How the Google Sheet gets into tasket
 status: resolved
 type: question
 created_at: 2026-11-18T22:03:17.742656+00:00
-updated_at: 2026-11-18T22:05:42.017714+00:00
+updated_at: 2026-11-18T22:08:07.243118+00:00
 resolved_at: 2026-11-18T22:05:42.017706+00:00
 resolution: Sheet comes in as a backup file made by tools/sheet-to-backup.mjs and loaded with Restore; no import code in the app.
 ---
@@ -29,3 +29,7 @@ Consequences:
 - The app needs only one way in: Restore. No CSV parser goes into the app.
 - The converter is a small script in the repo, `tools/sheet-to-backup.mjs`. It reads a CSV and writes events with the same code that the app uses, so its output always matches the app's format. The script is public, and the sheet's data is not committed.
 - The generated file can also carry the 2 fixed dates and the 1 blocker, so Ryan does not have to set them by hand.
+
+RULED 2026-11-18 (supersedes the converter part above): no sheet converter in the repo, and no Google or sheet support anywhere. Ryan: "need no sheet converter -- you determine your own backup/restore format that works for you, probably a mirror of however you're structuring the tables" and "the sheet was just an example of what I'm using, we need not support google and/or sheets in any way".
+
+So the backup format is tasket's stored event list, unchanged. Ryan's first file is made once by a throwaway script outside the repo.
