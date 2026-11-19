@@ -70,3 +70,8 @@
 # Secret keys (stored in this file but prefer env vars to avoid git exposure):
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
+
+# Cross-host sync: the Dolt-over-git remote at refs/dolt/data on origin.
+sync:
+    mode: dolt-native
+    remote: "git+https://github.com/aguynamedryan/tasket.git"
