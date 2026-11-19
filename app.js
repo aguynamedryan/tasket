@@ -235,8 +235,12 @@ function renderStatus() {
     age.textContent = `last backup: ${days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`}`;
     age.className = `backup-age${days > 7 ? " stale" : ""}`;
   }
-  document.getElementById("status").textContent =
-    `${state.projects.size} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · storage ${persisted ? "persistent" : "NOT persistent"}`;
+  const counts = `${state.projects.size} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · `;
+  document.getElementById("status").replaceChildren(counts, persisted
+    ? "storage: persistent"
+    : h("span", { class: "not-persistent" }, "storage: NOT persistent ",
+        h("a", { href: PERSIST_HELP, target: "_blank", rel: "noopener" }, "how to fix"), " · ",
+        h("button", { class: "link", onclick: requestPersist }, "ask Chrome again")));
   if (focusAfterRender) {
     document.getElementById(focusAfterRender)?.focus();
     focusAfterRender = null;
@@ -245,6 +249,14 @@ function renderStatus() {
 
 let focusAfterRender = null;
 let persisted = false;
+const PERSIST_HELP = "https://github.com/aguynamedryan/tasket#keeping-your-data";
+
+// Chrome never prompts; it grants or refuses on its own, so asking again
+// after installing or bookmarking the app can change the answer.
+async function requestPersist() {
+  persisted = (await navigator.storage?.persist?.()) ?? false;
+  render();
+}
 
 // --- drag and drop ---------------------------------------------------------
 
