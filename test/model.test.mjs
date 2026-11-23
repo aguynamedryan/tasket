@@ -117,6 +117,19 @@ test("bad events are refused with the index of the first bad one", () => {
   }
 });
 
+test("replay refuses an inherited object key such as toString as an event type", () => {
+  const inherited = Object.getOwnPropertyNames(Object.prototype);
+  assert.ok(inherited.includes("toString"));
+  for (const type of inherited) {
+    assert.throws(() => M.replay([...base(), e(type, {})]), (err) => {
+      assert.ok(err instanceof M.TasketError, `${type}: ${err}`);
+      assert.equal(err.message, `unknown event type ${type}`);
+      assert.equal(err.detail.index, 6);
+      return true;
+    }, type);
+  }
+});
+
 test("backup round trip gives the same state; bad files are refused", () => {
   const events = [...base(), e("item.dueSet", { itemId: "a1", due: "2026-11-19" }), e("block.added", { blockerId: "b1", blockedId: "a2" })];
   const text = JSON.stringify(M.makeBackup(events, "2026-11-18T13:00:00.000Z"));
