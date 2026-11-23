@@ -1,6 +1,6 @@
 // tasket's model. The stored truth is a list of events. This module turns the
 // events into the current state. It has no DOM and no storage, so the browser
-// app, the node tests and tools/sheet-to-backup.mjs all share it.
+// app and the node tests share it.
 //
 // An event is { type, at, ...payload }. `at` is an ISO timestamp.
 // State:
@@ -211,7 +211,7 @@ const handlers = {
 export const EVENT_TYPES = Object.keys(handlers);
 
 export function apply(state, event) {
-  const handler = handlers[event?.type];
+  const handler = Object.hasOwn(handlers, event?.type) ? handlers[event.type] : null;
   assert(handler, `unknown event type ${event?.type}`, { event });
   handler(state, event);
   return state;
