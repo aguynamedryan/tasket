@@ -138,6 +138,7 @@ function h(tag, attrs = {}, ...children) {
 }
 
 const projectName = (id) => state.projects.get(id)?.name ?? "?";
+const plainProjectCount = (s) => [...s.projects.values()].filter((p) => !M.isEpic(p)).length;
 const today = () => M.localDate();
 
 function dueClass(due) {
@@ -174,13 +175,14 @@ function renderDated() {
 
 function renderGrid() {
   const hideEmpty = localStorage.getItem(HIDE_EMPTY_KEY) === "1";
-  const projects = state.projectOrder
+  const rows = state.projectOrder
     .map((id) => state.projects.get(id))
-    .filter((p) => !hideEmpty || p.itemIds.length > 0);
+    .filter((p) => !hideEmpty || (M.isEpic(p) ? p.memberIds : p.itemIds).length > 0);
   const grid = document.getElementById("grid");
-  grid.replaceChildren(...projects.map(renderRow));
-  // Columns: the fullest row's items, plus its "+" cell.
-  grid.dataset.columns = Math.max(1, ...projects.map((p) => p.itemIds.length + 1));
+  grid.replaceChildren(...rows.map(renderRow));
+  // Columns: the fullest project row's items, plus its "+" cell. Epic rows wrap,
+  // so they do not widen the grid.
+  grid.dataset.columns = Math.max(1, ...rows.filter((p) => !M.isEpic(p)).map((p) => p.itemIds.length + 1));
   sizeColumns();
 }
 
@@ -195,12 +197,18 @@ function sizeColumns() {
   const free = grid.clientWidth - PROJECT_COLUMN_REM * rem;
   const cell = Math.max(MIN_CELL_REM * rem, Math.floor(free / Number(grid.dataset.columns || 1)));
   grid.style.setProperty("--cell", `${cell}px`);
+  // An epic row wraps at the visible width and always has room for one cell.
+  grid.style.setProperty("--epic-row-width", `${Math.max(grid.clientWidth, PROJECT_COLUMN_REM * rem + cell)}px`);
 }
 
 window.addEventListener("resize", sizeColumns);
 
 function renderRow(p) {
-  const cards = p.itemIds.map((id, i) => renderCard(state.items.get(id), i));
+  const isEpic = M.isEpic(p);
+  const noun = isEpic ? "epic" : "project";
+  const members = isEpic ? M.epicRow(state, p.id) : null;
+  const shown = isEpic ? [...members.open, ...members.finished] : p.itemIds.map((id) => state.items.get(id));
+  const cards = shown.map((it, i) => renderCard(it, i, p));
   const adder = h("form", { class: "add-item", onsubmit: (e) => {
     e.preventDefault();
     const input = e.target.elements.text;
@@ -215,13 +223,21 @@ function renderRow(p) {
   items.addEventListener("dragleave", clearDropMarks);
   items.addEventListener("drop", (e) => onItemDrop(e, p.id));
 
+  const progress = isEpic ? M.epicProgress(state, p.id) : null;
   const name = h("div", { class: "project", draggable: "true", title: "Drag to reorder. Double-click to rename." },
-    h("span", { class: "grip" }, "⋮⋮"), h("span", { class: "project-name" }, p.name),
-    h("button", { class: "to-top", title: "Send this project to the top", onclick: (e) => {
+    h("span", { class: "grip" }, "⋮⋮"),
+    isEpic ? h("button", { class: "swatch", type: "button", title: "Change the epic color",
+      "aria-label": `Change the color of ${p.name}`, style: `background:${M.EPIC_COLORS[p.color]}`,
+      ondblclick: (e) => e.stopPropagation(),
+      onclick: (e) => { e.stopPropagation(); openPalette(p, e.currentTarget); } }) : null,
+    h("span", { class: "project-title" },
+      h("span", { class: "project-name" }, p.name),
+      isEpic ? h("span", { class: "epic-progress" }, `${progress.done} of ${progress.total} done`) : null),
+    h("button", { class: "to-top", title: `Send this ${noun} to the top`, onclick: (e) => {
       e.stopPropagation();
       if (state.projectOrder[0] !== p.id) emit(ev("project.moved", { projectId: p.id, index: 0 }));
     } }, "⤒"),
-    h("button", { class: "to-bottom", title: "Send this project to the bottom", onclick: (e) => {
+    h("button", { class: "to-bottom", title: `Send this ${noun} to the bottom`, onclick: (e) => {
       e.stopPropagation();
       if (state.projectOrder.at(-1) !== p.id)
         emit(ev("project.moved", { projectId: p.id, index: state.projectOrder.length }));
@@ -230,31 +246,58 @@ function renderRow(p) {
   name.addEventListener("dragstart", (e) => { drag = { kind: "project", id: p.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.name); });
   name.addEventListener("dragend", endDrag);
 
-  const row = h("div", { class: "row", dataset: { projectId: p.id } }, name, items);
+  const row = h("div", { class: isEpic ? "row epic" : "row", dataset: { projectId: p.id } }, name, items);
   row.addEventListener("dragover", (e) => onProjectDragOver(e, row));
   row.addEventListener("drop", (e) => onProjectDrop(e, p.id, row));
   return row;
 }
 
-function renderCard(it, index) {
-  const blockers = M.blockersOf(state, it.id);
-  const blocking = M.blockedBy(state, it.id).filter((b) => b.finishedAt == null);
+// One stacked inset box-shadow. The first shadow paints on top, so it is the
+// outermost border. Each later shadow shows only as a ring inside the one
+// before it. The due color is last, so it is the innermost border.
+const BORDER_PX = 2;
+
+function borderShadow({ due, colors }) {
+  const layers = colors.map((color) => M.EPIC_COLORS[color]);
+  if (due) layers.push("var(--due-color)");
+  return layers.map((color, i) => `inset 0 0 0 ${(i + 1) * BORDER_PX}px ${color}`).join(", ");
+}
+
+// `row` is the project or epic whose row shows this card. Only an epic row can
+// show a finished item or a task that belongs to another project.
+function renderCard(it, index, row) {
+  const finished = it.finishedAt != null;
+  const linked = M.isEpic(row) && it.projectId !== row.id;
+  const borders = M.cardBorders(state, it.id);
+  const due = borders.due;
+  const shadow = borderShadow(borders);
+  const blockers = finished ? [] : M.blockersOf(state, it.id);
+  const blocking = finished ? [] : M.blockedBy(state, it.id).filter((b) => b.finishedAt == null);
   const cls = ["card"];
   if (index === 0) cls.push("first");
+  if (finished) cls.push("done");
   if (blockers.length) cls.push("blocked");
-  if (it.due) cls.push("dated", dueClass(it.due));
+  if (due) cls.push("dated", dueClass(due));
 
-  const card = h("div", { class: cls.join(" "), draggable: "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+  const card = h("div", { class: cls.join(" "), draggable: finished ? null : "true", style: shadow ? `box-shadow:${shadow}` : null, dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+    linked ? h("div", { class: "card-project" }, projectName(it.projectId)) : null,
     h("div", { class: "card-text" }, it.text),
-    it.due ? h("div", { class: "badge due" }, M.dueLabel(it.due, today())) : null,
+    due ? h("div", { class: "badge due" }, M.dueLabel(due, today())) : null,
+    borders.hidden > 0 ? h("div", { class: "badge more-epics",
+      title: `Also in ${M.epicsOf(state, it.id).slice(borders.colors.length).map((p) => p.name).join(", ")}` }, `+${borders.hidden}`) : null,
     blockers.length ? h("div", { class: "badge waits" }, "waiting on: ",
       blockers.map((b) => `${projectName(b.projectId)} · ${b.text}`).join("; ")) : null,
     blocking.length ? h("div", { class: "badge blocks" }, `blocks ${blocking.length}`) : null,
-    h("div", { class: "age", title: `open for ${M.ageDays(it, today())} days` }, `${M.ageDays(it, today())}d`),
-    h("button", { class: "finish", title: "Finish", onclick: (e) => { e.stopPropagation(); emit(ev("item.finished", { itemId: it.id })); } }, "✓"),
+    finished ? null : h("div", { class: "age", title: `open for ${M.ageDays(it, today())} days` }, `${M.ageDays(it, today())}d`),
+    finished
+      ? h("button", { class: "reopen", title: "Reopen", onclick: (e) => { e.stopPropagation(); emit(ev("item.reopened", { itemId: it.id })); } }, "Reopen")
+      : h("button", { class: "finish", title: "Finish", onclick: (e) => { e.stopPropagation(); emit(ev("item.finished", { itemId: it.id })); } }, "✓"),
+    linked ? h("button", { class: "unlink", title: `Remove from ${row.name}. The task stays in ${projectName(it.projectId)}.`,
+      "aria-label": `Remove from ${row.name}`,
+      onclick: (e) => { e.stopPropagation(); emit(ev("epic.unlinked", { projectId: row.id, itemId: it.id })); } }, "×") : null,
   );
   card.addEventListener("dragstart", (e) => {
-    drag = { kind: "item", id: it.id };
+    drag = { kind: "item", id: it.id, from: row.id };
     e.dataTransfer.effectAllowed = "linkMove"; // move = reorder, link = make a blocker
     e.dataTransfer.setData("text/plain", it.text);
     card.classList.add("dragging");
@@ -282,7 +325,7 @@ function renderStatus() {
     age.textContent = `last backup: ${days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`}`;
     age.className = `backup-age${days > 7 ? " stale" : ""}`;
   }
-  const counts = `${state.projects.size} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · `;
+  const counts = `${plainProjectCount(state)} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · `;
   document.getElementById("status").replaceChildren(counts, persisted
     ? "storage: persistent"
     : h("span", { class: "not-persistent" }, "storage: NOT persistent. Fix: ",
@@ -330,29 +373,36 @@ const BLOCK_ZONE = [0.25, 0.75];
 
 // Where would the dragged item land?
 // Returns { block: card } to make the dragged item block that card's item,
-// or { index, card, after } to move it to that position in the row.
+// or { index, card, after } to place it at that position among the row's open
+// cards. Finished cards stay at the end, so a drop among them lands after the
+// last open card.
 function itemDropTarget(e, projectId) {
   const cards = [...document.querySelectorAll(`.items[data-project-id="${projectId}"] .card`)]
     .filter((c) => c.dataset.itemId !== drag.id);
+  const open = cards.filter((c) => !c.classList.contains("done"));
+  const place = (index, card, after) =>
+    index < open.length ? { index, card, after } : { index: open.length, card: open.at(-1), after: true };
   for (let i = 0; i < cards.length; i++) {
     const r = cards[i].getBoundingClientRect();
     const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (inside) {
       const frac = (e.clientX - r.left) / r.width;
       if (frac > BLOCK_ZONE[0] && frac < BLOCK_ZONE[1]) return { block: cards[i] };
-      return frac <= BLOCK_ZONE[0]
-        ? { index: i, card: cards[i], after: false }
-        : { index: i + 1, card: cards[i], after: true };
+      return frac <= BLOCK_ZONE[0] ? place(i, cards[i], false) : place(i + 1, cards[i], true);
     }
     const sameLine = e.clientY >= r.top && e.clientY <= r.bottom;
-    if ((sameLine && e.clientX < r.left) || e.clientY < r.top)
-      return { index: i, card: cards[i], after: false };
+    if ((sameLine && e.clientX < r.left) || e.clientY < r.top) return place(i, cards[i], false);
   }
-  return { index: cards.length, card: cards.at(-1), after: true };
+  return place(cards.length, cards.at(-1), true);
 }
+
+// A linked card is an alias of a task in another project. Dropping it in a
+// project row must not move the real task.
+const isAlias = ({ id, from }) => M.isEpic(state.projects.get(from)) && state.items.get(id).projectId !== from;
 
 // Why the dragged item cannot block this one, or null if it can.
 function blockRefusal(blockerId, blockedId) {
+  if (state.items.get(blockedId).finishedAt != null) return "is finished";
   if (state.blocks.has(`${blockerId}>${blockedId}`)) return "already blocks this";
   if (M.wouldCycle(state, blockerId, blockedId)) return "would make a loop";
   return null;
@@ -363,14 +413,19 @@ function onItemDragOver(e, projectId) {
   e.preventDefault();
   e.stopPropagation();
   clearDropMarks();
+  const target = state.projects.get(projectId);
   const t = itemDropTarget(e, projectId);
   if (t.block) {
     const refusal = blockRefusal(drag.id, t.block.dataset.itemId);
     t.block.classList.add(refusal ? "drop-refused" : "drop-block");
     t.block.dataset.dropLabel = refusal ?? "blocks this";
     e.dataTransfer.dropEffect = refusal ? "none" : "link";
+  } else if (!M.isEpic(target) && isAlias(drag)) {
+    e.currentTarget.classList.add("drop-refused");
+    e.currentTarget.dataset.dropLabel = "a linked task stays in its project";
+    e.dataTransfer.dropEffect = "none";
   } else {
-    e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = M.isEpic(target) && !target.memberIds.includes(drag.id) ? "link" : "move";
     if (t.card) t.card.classList.add(t.after ? "drop-after" : "drop-before");
     else e.currentTarget.classList.add("drop-end");
   }
@@ -382,16 +437,32 @@ function onItemDrop(e, projectId) {
   e.stopPropagation();
   const t = itemDropTarget(e, projectId);
   const id = drag.id;
+  const alias = isAlias(drag);
   endDrag();
   if (t.block) {
     const blockedId = t.block.dataset.itemId;
     if (!blockRefusal(id, blockedId)) emit(ev("block.added", { blockerId: id, blockedId }));
     return;
   }
+  const target = state.projects.get(projectId);
+  if (M.isEpic(target)) return dropInEpic(target, id, t.index);
+  if (alias) return;
   const it = state.items.get(id);
   const current = state.projects.get(it.projectId).itemIds.indexOf(it.id);
   if (it.projectId === projectId && current === t.index) return;
   emit(ev("item.moved", { itemId: id, projectId, index: t.index }));
+}
+
+// `openIndex` counts open cards only, but memberIds also holds finished members.
+// So find the open member to insert before, and use its place in memberIds.
+function dropInEpic(p, id, openIndex) {
+  const rest = p.memberIds.filter((m) => m !== id);
+  const open = rest.filter((m) => M.isOpen(state, m));
+  const next = open[openIndex];
+  const index = next ? rest.indexOf(next) : open.length ? rest.indexOf(open.at(-1)) + 1 : 0;
+  if (!p.memberIds.includes(id)) return emit(ev("epic.linked", { projectId: p.id, itemId: id, index }));
+  const current = p.memberIds.filter((m) => M.isOpen(state, m)).indexOf(id);
+  if (current !== openIndex) emit(ev("epic.memberMoved", { projectId: p.id, itemId: id, index }));
 }
 
 function projectDropIndex(e, row) {
@@ -423,14 +494,45 @@ function onProjectDrop(e, targetId, row) {
 // --- editing ---------------------------------------------------------------
 
 function renameProject(p) {
-  const name = prompt("Project name (leave empty to delete the project)", p.name);
+  const noun = M.isEpic(p) ? "Epic" : "Project";
+  const name = prompt(`${noun} name (leave empty to delete the ${noun.toLowerCase()})`, p.name);
   if (name == null) return;
   if (name.trim() === "") {
-    if (confirm(`Delete project "${p.name}" and its ${p.itemIds.length} open items?`))
-      emit(ev("project.removed", { projectId: p.id }));
+    if (confirm(deleteQuestion(p))) emit(ev("project.removed", { projectId: p.id }));
     return;
   }
   if (name.trim() !== p.name) emit(ev("project.renamed", { projectId: p.id, name }));
+}
+
+function deleteQuestion(p) {
+  if (!M.isEpic(p)) return `Delete project "${p.name}" and its ${p.itemIds.length} open items?`;
+  const own = p.memberIds.filter((id) => state.items.get(id).projectId === p.id).length;
+  const linked = p.memberIds.length - own;
+  return `Delete epic "${p.name}"?\n\n` +
+    `This deletes its ${own} own ${own === 1 ? "task" : "tasks"}, open or finished.\n` +
+    `${linked} linked ${linked === 1 ? "task stays" : "tasks stay"} in ${linked === 1 ? "its project" : "their projects"}.`;
+}
+
+// Any palette color, in palette order. It prefers a color that no epic uses.
+function nextEpicColor() {
+  const uses = (color) => [...state.projects.values()].filter((p) => M.isEpic(p) && p.color === color).length;
+  return Object.keys(M.EPIC_COLORS).reduce((best, color) => (uses(color) < uses(best) ? color : best));
+}
+
+const palette = document.getElementById("palette");
+
+function openPalette(p, anchor) {
+  if (palette.matches(":popover-open")) palette.hidePopover();
+  palette.replaceChildren(...Object.entries(M.EPIC_COLORS).map(([color, hex]) =>
+    h("button", { type: "button", class: color === p.color ? "swatch current" : "swatch", title: color,
+      "aria-label": color, dataset: { color }, style: `background:${hex}`, onclick: () => {
+        palette.hidePopover();
+        if (color !== p.color) emit(ev("epic.colorSet", { projectId: p.id, color }));
+      } })));
+  const r = anchor.getBoundingClientRect();
+  palette.style.left = `${r.left}px`;
+  palette.style.top = `${r.bottom + 4}px`;
+  palette.showPopover();
 }
 
 const dialog = document.getElementById("editor");
@@ -442,7 +544,9 @@ function openEditor(itemId) {
   const it = state.items.get(itemId);
   form.elements.text.value = it.text;
   form.elements.due.value = it.due ?? "";
+  form.querySelector('[data-act="finish"]').hidden = it.finishedAt != null;
   fillBlockLists();
+  fillEpicList();
   dialog.returnValue = "";
   dialog.showModal();
 }
@@ -471,6 +575,30 @@ function fillBlockLists() {
   }
   select.replaceChildren(...options);
 }
+
+function fillEpicList() {
+  const it = state.items.get(editingId);
+  form.querySelector('[data-list="epics"]').replaceChildren(...M.epicsOf(state, it.id).map((p) =>
+    h("li", { dataset: { epicId: p.id } },
+      h("span", { class: "swatch", style: `background:${M.EPIC_COLORS[p.color]}` }), `${p.name} `,
+      it.projectId === p.id
+        ? h("span", { class: "epic-own" }, "(this task belongs to this epic)")
+        : h("button", { type: "button", class: "link", onclick: () =>
+            emit(ev("epic.unlinked", { projectId: p.id, itemId: it.id })).then(fillEpicList) }, "remove"))));
+
+  const others = state.projectOrder.map((id) => state.projects.get(id))
+    .filter((p) => M.isEpic(p) && !p.memberIds.includes(it.id));
+  const select = form.elements["add-epic"];
+  select.replaceChildren(h("option", { value: "" }, others.length ? "— choose an epic —" : "— no other epics —"),
+    ...others.map((p) => h("option", { value: p.id }, p.name)));
+  select.disabled = others.length === 0;
+}
+
+form.elements["add-epic"].addEventListener("change", (e) => {
+  const projectId = e.target.value;
+  if (!projectId) return;
+  emit(ev("epic.linked", { projectId, itemId: editingId })).then(fillEpicList);
+});
 
 form.elements["add-blocker"].addEventListener("change", (e) => {
   const blockerId = e.target.value;
@@ -510,6 +638,14 @@ document.getElementById("add-project").addEventListener("submit", (e) => {
   if (!name) return;
   e.target.reset();
   emit(ev("project.added", { projectId: M.newId(), name }));
+});
+
+document.getElementById("add-epic").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = e.target.elements.name.value.trim();
+  if (!name) return;
+  e.target.reset();
+  emit(ev("epic.added", { projectId: M.newId(), name, color: nextEpicColor() }));
 });
 
 const tooltips = document.getElementById("tooltips");
@@ -552,7 +688,7 @@ restoreFile.addEventListener("change", async () => {
   }
   const s = M.replay(backup.events);
   const msg = `Replace everything in tasket with ${file.name}?\n\n` +
-    `The file has ${s.projects.size} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
+    `The file has ${plainProjectCount(s)} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
     `tasket now has ${events.length} events. They will be lost unless you have a backup.`;
   if (!confirm(msg)) return;
   await replaceEvents(db, backup.events);

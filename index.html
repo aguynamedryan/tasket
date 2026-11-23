@@ -28,10 +28,16 @@
     <div id="error" class="error" hidden></div>
     <section id="dated" class="dated" aria-label="Fixed dates"></section>
     <section id="grid" class="grid" aria-label="Projects"></section>
-    <form id="add-project" class="add-project">
-      <input name="name" placeholder="New project" autocomplete="off">
-      <button>Add project</button>
-    </form>
+    <div class="add-forms">
+      <form id="add-project" class="add-project">
+        <input name="name" placeholder="New project" autocomplete="off">
+        <button>Add project</button>
+      </form>
+      <form id="add-epic" class="add-project">
+        <input name="name" placeholder="New epic" autocomplete="off">
+        <button>Add epic</button>
+      </form>
+    </div>
     <details id="finished" class="finished">
       <summary>Recently finished</summary>
       <ul></ul>
@@ -39,6 +45,8 @@
   </main>
 
   <footer id="status" class="status"></footer>
+
+  <div id="palette" class="palette" popover aria-label="Epic colors"></div>
 
   <dialog id="editor">
     <form method="dialog" class="editor">
@@ -51,6 +59,10 @@
         <div><strong>Waiting on</strong> <ul data-list="blockers"></ul></div>
         <label>Add a blocker <select name="add-blocker"></select></label>
         <div><strong>Blocks</strong> <ul data-list="blocking"></ul></div>
+      </div>
+      <div class="block-list epic-list">
+        <div><strong>Epics</strong> <ul data-list="epics"></ul></div>
+        <label>Add to an epic <select name="add-epic"></select></label>
       </div>
       <div class="row actions">
         <button type="button" data-act="remove" class="danger">Delete item</button>
