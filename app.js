@@ -714,9 +714,12 @@ restoreFile.addEventListener("change", async () => {
     return;
   }
   const s = M.replay(backup.events);
+  // Count the stored log, not `events`, because this tab can be stale. Queue the
+  // read so it includes this tab's earlier changes. Do not take lastKey from it.
+  const storedCount = await inWriteOrder(async () => (await loadEvents(db)).events.length);
   const msg = `Replace everything in tasket with ${file.name}?\n\n` +
     `The file has ${plainProjectCount(s)} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
-    `tasket now has ${events.length} events. They will be lost unless you have a backup.`;
+    `tasket now has ${storedCount} events. They will be lost unless you have a backup.`;
   if (!confirm(msg)) return;
   await inWriteOrder(async () => {
     await replaceEvents(db, backup.events);
