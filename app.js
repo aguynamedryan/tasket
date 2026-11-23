@@ -50,6 +50,15 @@ class UnloadableLogError extends Error {
   }
 }
 
+// The model refused a new event, such as a second Finish. Nothing was stored
+// and nothing is wrong, so the next successful write clears this message.
+class RefusedActionError extends Error {
+  constructor(cause) {
+    super(cause.message, { cause });
+    this.name = "RefusedActionError";
+  }
+}
+
 async function loadEvents(db) {
   const tx = db.transaction(STORE, "readonly");
   const store = tx.objectStore(STORE);
@@ -115,21 +124,44 @@ function inWriteOrder(write) {
 async function emit(...newEvents) {
   await inWriteOrder(async () => {
     await ready;
-    const next = M.replay([...events, ...newEvents]);
+    const next = replayWith(newEvents);
     await appendEvents(db, newEvents);
     events.push(...newEvents);
     state = next;
     render();
+    if (refusalShown) hideError();
   });
+}
+
+// Only a model error at a new event is a refusal. Any other error is a defect.
+function replayWith(newEvents) {
+  try {
+    return M.replay([...events, ...newEvents]);
+  } catch (err) {
+    if (err instanceof M.TasketError && err.detail.index >= events.length) throw new RefusedActionError(err);
+    throw err;
+  }
 }
 
 const ev = (type, payload) => M.makeEvent(type, payload);
 
+// True when the error box shows a refused action. Every other error stays
+// visible until a reload or a Restore, because it can need the user to act.
+let refusalShown = false;
+
 function showError(err) {
+  console.error(err);
   const box = document.getElementById("error");
+  const refusal = err instanceof RefusedActionError;
+  if (refusal && !box.hidden && !refusalShown) return; // keep the error that needs the user
   box.textContent = `${err.message}`;
   box.hidden = false;
-  console.error(err);
+  refusalShown = refusal;
+}
+
+function hideError() {
+  document.getElementById("error").hidden = true;
+  refusalShown = false;
 }
 
 window.addEventListener("unhandledrejection", (e) => showError(e.reason));
@@ -727,7 +759,7 @@ restoreFile.addEventListener("change", async () => {
     state = s;
     ready = Promise.resolve(); // edits work again, even if the old log could not replay
   });
-  document.getElementById("error").hidden = true;
+  hideError();
   localStorage.setItem(LAST_BACKUP_KEY, backup.exportedAt);
   render();
 });
