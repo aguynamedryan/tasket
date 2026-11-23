@@ -219,11 +219,9 @@ function renderRow(p) {
   } }, h("input", { name: "text", placeholder: "+", autocomplete: "off", id: `add-${p.id}` }));
 
   const items = h("div", { class: "items", dataset: { projectId: p.id } }, cards, adder);
-  if (!isEpic) {
-    items.addEventListener("dragover", (e) => onItemDragOver(e, p.id));
-    items.addEventListener("dragleave", clearDropMarks);
-    items.addEventListener("drop", (e) => onItemDrop(e, p.id));
-  }
+  items.addEventListener("dragover", (e) => onItemDragOver(e, p.id));
+  items.addEventListener("dragleave", clearDropMarks);
+  items.addEventListener("drop", (e) => onItemDrop(e, p.id));
 
   const progress = isEpic ? M.epicProgress(state, p.id) : null;
   const name = h("div", { class: "project", draggable: "true", title: "Drag to reorder. Double-click to rename." },
@@ -268,7 +266,7 @@ function renderCard(it, index, row) {
   if (blockers.length) cls.push("blocked");
   if (due) cls.push("dated", dueClass(due));
 
-  const card = h("div", { class: cls.join(" "), draggable: M.isEpic(row) ? null : "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+  const card = h("div", { class: cls.join(" "), draggable: finished ? null : "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
     linked ? h("div", { class: "card-project" }, projectName(it.projectId)) : null,
     h("div", { class: "card-text" }, it.text),
     due ? h("div", { class: "badge due" }, M.dueLabel(due, today())) : null,
@@ -279,9 +277,12 @@ function renderCard(it, index, row) {
     finished
       ? h("button", { class: "reopen", title: "Reopen", onclick: (e) => { e.stopPropagation(); emit(ev("item.reopened", { itemId: it.id })); } }, "Reopen")
       : h("button", { class: "finish", title: "Finish", onclick: (e) => { e.stopPropagation(); emit(ev("item.finished", { itemId: it.id })); } }, "✓"),
+    linked ? h("button", { class: "unlink", title: `Remove from ${row.name}. The task stays in ${projectName(it.projectId)}.`,
+      "aria-label": `Remove from ${row.name}`,
+      onclick: (e) => { e.stopPropagation(); emit(ev("epic.unlinked", { projectId: row.id, itemId: it.id })); } }, "×") : null,
   );
   card.addEventListener("dragstart", (e) => {
-    drag = { kind: "item", id: it.id };
+    drag = { kind: "item", id: it.id, from: row.id };
     e.dataTransfer.effectAllowed = "linkMove"; // move = reorder, link = make a blocker
     e.dataTransfer.setData("text/plain", it.text);
     card.classList.add("dragging");
@@ -357,29 +358,36 @@ const BLOCK_ZONE = [0.25, 0.75];
 
 // Where would the dragged item land?
 // Returns { block: card } to make the dragged item block that card's item,
-// or { index, card, after } to move it to that position in the row.
+// or { index, card, after } to place it at that position among the row's open
+// cards. Finished cards stay at the end, so a drop among them lands after the
+// last open card.
 function itemDropTarget(e, projectId) {
   const cards = [...document.querySelectorAll(`.items[data-project-id="${projectId}"] .card`)]
     .filter((c) => c.dataset.itemId !== drag.id);
+  const open = cards.filter((c) => !c.classList.contains("done"));
+  const place = (index, card, after) =>
+    index < open.length ? { index, card, after } : { index: open.length, card: open.at(-1), after: true };
   for (let i = 0; i < cards.length; i++) {
     const r = cards[i].getBoundingClientRect();
     const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (inside) {
       const frac = (e.clientX - r.left) / r.width;
       if (frac > BLOCK_ZONE[0] && frac < BLOCK_ZONE[1]) return { block: cards[i] };
-      return frac <= BLOCK_ZONE[0]
-        ? { index: i, card: cards[i], after: false }
-        : { index: i + 1, card: cards[i], after: true };
+      return frac <= BLOCK_ZONE[0] ? place(i, cards[i], false) : place(i + 1, cards[i], true);
     }
     const sameLine = e.clientY >= r.top && e.clientY <= r.bottom;
-    if ((sameLine && e.clientX < r.left) || e.clientY < r.top)
-      return { index: i, card: cards[i], after: false };
+    if ((sameLine && e.clientX < r.left) || e.clientY < r.top) return place(i, cards[i], false);
   }
-  return { index: cards.length, card: cards.at(-1), after: true };
+  return place(cards.length, cards.at(-1), true);
 }
+
+// A linked card is an alias of a task in another project. Dropping it in a
+// project row must not move the real task.
+const isAlias = ({ id, from }) => M.isEpic(state.projects.get(from)) && state.items.get(id).projectId !== from;
 
 // Why the dragged item cannot block this one, or null if it can.
 function blockRefusal(blockerId, blockedId) {
+  if (state.items.get(blockedId).finishedAt != null) return "is finished";
   if (state.blocks.has(`${blockerId}>${blockedId}`)) return "already blocks this";
   if (M.wouldCycle(state, blockerId, blockedId)) return "would make a loop";
   return null;
@@ -390,14 +398,19 @@ function onItemDragOver(e, projectId) {
   e.preventDefault();
   e.stopPropagation();
   clearDropMarks();
+  const target = state.projects.get(projectId);
   const t = itemDropTarget(e, projectId);
   if (t.block) {
     const refusal = blockRefusal(drag.id, t.block.dataset.itemId);
     t.block.classList.add(refusal ? "drop-refused" : "drop-block");
     t.block.dataset.dropLabel = refusal ?? "blocks this";
     e.dataTransfer.dropEffect = refusal ? "none" : "link";
+  } else if (!M.isEpic(target) && isAlias(drag)) {
+    e.currentTarget.classList.add("drop-refused");
+    e.currentTarget.dataset.dropLabel = "a linked task stays in its project";
+    e.dataTransfer.dropEffect = "none";
   } else {
-    e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = M.isEpic(target) && !target.memberIds.includes(drag.id) ? "link" : "move";
     if (t.card) t.card.classList.add(t.after ? "drop-after" : "drop-before");
     else e.currentTarget.classList.add("drop-end");
   }
@@ -409,16 +422,32 @@ function onItemDrop(e, projectId) {
   e.stopPropagation();
   const t = itemDropTarget(e, projectId);
   const id = drag.id;
+  const alias = isAlias(drag);
   endDrag();
   if (t.block) {
     const blockedId = t.block.dataset.itemId;
     if (!blockRefusal(id, blockedId)) emit(ev("block.added", { blockerId: id, blockedId }));
     return;
   }
+  const target = state.projects.get(projectId);
+  if (M.isEpic(target)) return dropInEpic(target, id, t.index);
+  if (alias) return;
   const it = state.items.get(id);
   const current = state.projects.get(it.projectId).itemIds.indexOf(it.id);
   if (it.projectId === projectId && current === t.index) return;
   emit(ev("item.moved", { itemId: id, projectId, index: t.index }));
+}
+
+// `openIndex` counts open cards only, but memberIds also holds finished members.
+// So find the open member to insert before, and use its place in memberIds.
+function dropInEpic(p, id, openIndex) {
+  const rest = p.memberIds.filter((m) => m !== id);
+  const open = rest.filter((m) => M.isOpen(state, m));
+  const next = open[openIndex];
+  const index = next ? rest.indexOf(next) : open.length ? rest.indexOf(open.at(-1)) + 1 : 0;
+  if (!p.memberIds.includes(id)) return emit(ev("epic.linked", { projectId: p.id, itemId: id, index }));
+  const current = p.memberIds.filter((m) => M.isOpen(state, m)).indexOf(id);
+  if (current !== openIndex) emit(ev("epic.memberMoved", { projectId: p.id, itemId: id, index }));
 }
 
 function projectDropIndex(e, row) {

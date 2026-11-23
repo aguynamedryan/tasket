@@ -123,6 +123,12 @@ input, textarea, select { font: inherit; }
   padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; pointer-events: none;
 }
 .card.drop-refused::after { background: var(--overdue); }
+.items.drop-refused { position: relative; outline: 2px dashed var(--overdue); outline-offset: -3px; }
+.items.drop-refused::after {
+  content: attr(data-drop-label); position: absolute; left: 0.5rem; bottom: 0.1rem;
+  font-size: 0.72rem; font-weight: 700; color: white; background: var(--overdue);
+  padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; pointer-events: none;
+}
 .card-text { overflow-wrap: anywhere; }
 .card-project { font-size: 0.72rem; font-weight: 600; color: var(--muted); overflow-wrap: anywhere; }
 .card.done { opacity: 0.5; }
@@ -146,6 +152,12 @@ input, textarea, select { font: inherit; }
 }
 .card:hover .finish { color: var(--muted); }
 .finish:hover { color: var(--accent) !important; }
+.unlink {
+  position: absolute; bottom: 0.15rem; right: 0.25rem; padding: 0 0.3rem; font-size: 0.95rem; line-height: 1.1;
+  border: none; background: none; color: var(--muted); visibility: hidden;
+}
+.card:hover .unlink { visibility: visible; }
+.unlink:hover { color: var(--overdue); }
 .reopen { position: absolute; top: 0.25rem; right: 0.25rem; padding: 0 0.3rem; font-size: 0.75rem; }
 
 .age { position: absolute; top: 0.5rem; right: 1.7rem; font-size: 0.72rem; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
