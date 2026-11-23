@@ -675,8 +675,16 @@ hideEmpty.addEventListener("change", () => {
 
 // --- backup and restore ----------------------------------------------------
 
-document.getElementById("backup").addEventListener("click", () => {
-  const backup = M.makeBackup(events);
+// Read the stored log, not `events`, because this tab can be stale or still
+// loading. Wait for dbReady, not `ready`, so Backup works when the log cannot
+// replay. Queue the read so the file includes this tab's earlier changes.
+// Do not take lastKey from this read: a stale tab must stay stale.
+document.getElementById("backup").addEventListener("click", async () => {
+  const stored = await inWriteOrder(async () => {
+    await dbReady;
+    return (await loadEvents(db)).events;
+  });
+  const backup = M.makeBackup(stored);
   const blob = new Blob([JSON.stringify(backup, null, 1)], { type: "application/json" });
   const a = h("a", { href: URL.createObjectURL(blob), download: `tasket-backup-${backup.exportedAt.slice(0, 19).replace(/:/g, "")}.json` });
   a.click();
