@@ -41,7 +41,7 @@ input, textarea, select { font: inherit; }
 .error { background: #fde8e8; color: var(--overdue); border: 1px solid var(--overdue); padding: 0.5rem 0.8rem; border-radius: 6px; margin-bottom: 0.8rem; white-space: pre-wrap; }
 
 /* Fixed dates: the most visible thing on the page. */
-.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
 .dated-item {
   display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem;
   text-align: left; color: white; border: none; padding: 0.5rem 0.8rem; border-radius: 8px;
