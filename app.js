@@ -50,6 +50,15 @@ class UnloadableLogError extends Error {
   }
 }
 
+// The model refused a new event, such as a second Finish. Nothing was stored
+// and nothing is wrong, so the next successful write clears this message.
+class RefusedActionError extends Error {
+  constructor(cause) {
+    super(cause.message, { cause });
+    this.name = "RefusedActionError";
+  }
+}
+
 async function loadEvents(db) {
   const tx = db.transaction(STORE, "readonly");
   const store = tx.objectStore(STORE);
@@ -115,21 +124,44 @@ function inWriteOrder(write) {
 async function emit(...newEvents) {
   await inWriteOrder(async () => {
     await ready;
-    const next = M.replay([...events, ...newEvents]);
+    const next = replayWith(newEvents);
     await appendEvents(db, newEvents);
     events.push(...newEvents);
     state = next;
     render();
+    if (refusalShown) hideError();
   });
+}
+
+// Only a model error at a new event is a refusal. Any other error is a defect.
+function replayWith(newEvents) {
+  try {
+    return M.replay([...events, ...newEvents]);
+  } catch (err) {
+    if (err instanceof M.TasketError && err.detail.index >= events.length) throw new RefusedActionError(err);
+    throw err;
+  }
 }
 
 const ev = (type, payload) => M.makeEvent(type, payload);
 
+// True when the error box shows a refused action. Every other error stays
+// visible until a reload or a Restore, because it can need the user to act.
+let refusalShown = false;
+
 function showError(err) {
+  console.error(err);
   const box = document.getElementById("error");
+  const refusal = err instanceof RefusedActionError;
+  if (refusal && !box.hidden && !refusalShown) return; // keep the error that needs the user
   box.textContent = `${err.message}`;
   box.hidden = false;
-  console.error(err);
+  refusalShown = refusal;
+}
+
+function hideError() {
+  document.getElementById("error").hidden = true;
+  refusalShown = false;
 }
 
 window.addEventListener("unhandledrejection", (e) => showError(e.reason));
@@ -518,7 +550,13 @@ function renameProject(p) {
 }
 
 function deleteQuestion(p) {
-  if (!M.isEpic(p)) return `Delete project "${p.name}" and its ${p.itemIds.length} open items?`;
+  if (!M.isEpic(p)) {
+    // Count what project.removed deletes: every item of the project, open or finished.
+    const tasks = [...state.items.values()].filter((it) => it.projectId === p.id);
+    const finished = tasks.filter((it) => it.finishedAt != null).length;
+    const count = (n, word) => `${n} ${word} ${n === 1 ? "task" : "tasks"}`;
+    return `Delete project "${p.name}" and its ${count(tasks.length - finished, "open")} and ${count(finished, "finished")}?`;
+  }
   const own = p.memberIds.filter((id) => state.items.get(id).projectId === p.id).length;
   const linked = p.memberIds.length - own;
   return `Delete epic "${p.name}"?\n\n` +
@@ -708,9 +746,12 @@ restoreFile.addEventListener("change", async () => {
     return;
   }
   const s = M.replay(backup.events);
+  // Count the stored log, not `events`, because this tab can be stale. Queue the
+  // read so it includes this tab's earlier changes. Do not take lastKey from it.
+  const storedCount = await inWriteOrder(async () => (await loadEvents(db)).events.length);
   const msg = `Replace everything in tasket with ${file.name}?\n\n` +
     `The file has ${plainProjectCount(s)} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
-    `tasket now has ${events.length} events. They will be lost unless you have a backup.`;
+    `tasket now has ${storedCount} events. They will be lost unless you have a backup.`;
   if (!confirm(msg)) return;
   await inWriteOrder(async () => {
     await replaceEvents(db, backup.events);
@@ -718,7 +759,7 @@ restoreFile.addEventListener("change", async () => {
     state = s;
     ready = Promise.resolve(); // edits work again, even if the old log could not replay
   });
-  document.getElementById("error").hidden = true;
+  hideError();
   localStorage.setItem(LAST_BACKUP_KEY, backup.exportedAt);
   render();
 });
