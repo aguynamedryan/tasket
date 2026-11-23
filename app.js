@@ -138,6 +138,7 @@ function h(tag, attrs = {}, ...children) {
 }
 
 const projectName = (id) => state.projects.get(id)?.name ?? "?";
+const plainProjectCount = (s) => [...s.projects.values()].filter((p) => !M.isEpic(p)).length;
 const today = () => M.localDate();
 
 function dueClass(due) {
@@ -174,13 +175,14 @@ function renderDated() {
 
 function renderGrid() {
   const hideEmpty = localStorage.getItem(HIDE_EMPTY_KEY) === "1";
-  const projects = state.projectOrder
+  const rows = state.projectOrder
     .map((id) => state.projects.get(id))
-    .filter((p) => !hideEmpty || p.itemIds.length > 0);
+    .filter((p) => !hideEmpty || (M.isEpic(p) ? p.memberIds : p.itemIds).length > 0);
   const grid = document.getElementById("grid");
-  grid.replaceChildren(...projects.map(renderRow));
-  // Columns: the fullest row's items, plus its "+" cell.
-  grid.dataset.columns = Math.max(1, ...projects.map((p) => p.itemIds.length + 1));
+  grid.replaceChildren(...rows.map(renderRow));
+  // Columns: the fullest project row's items, plus its "+" cell. Epic rows wrap,
+  // so they do not widen the grid.
+  grid.dataset.columns = Math.max(1, ...rows.filter((p) => !M.isEpic(p)).map((p) => p.itemIds.length + 1));
   sizeColumns();
 }
 
@@ -195,12 +197,18 @@ function sizeColumns() {
   const free = grid.clientWidth - PROJECT_COLUMN_REM * rem;
   const cell = Math.max(MIN_CELL_REM * rem, Math.floor(free / Number(grid.dataset.columns || 1)));
   grid.style.setProperty("--cell", `${cell}px`);
+  // An epic row wraps at the visible width and always has room for one cell.
+  grid.style.setProperty("--epic-row-width", `${Math.max(grid.clientWidth, PROJECT_COLUMN_REM * rem + cell)}px`);
 }
 
 window.addEventListener("resize", sizeColumns);
 
 function renderRow(p) {
-  const cards = p.itemIds.map((id, i) => renderCard(state.items.get(id), i));
+  const isEpic = M.isEpic(p);
+  const noun = isEpic ? "epic" : "project";
+  const members = isEpic ? M.epicRow(state, p.id) : null;
+  const shown = isEpic ? [...members.open, ...members.finished] : p.itemIds.map((id) => state.items.get(id));
+  const cards = shown.map((it, i) => renderCard(it, i, p));
   const adder = h("form", { class: "add-item", onsubmit: (e) => {
     e.preventDefault();
     const input = e.target.elements.text;
@@ -211,17 +219,27 @@ function renderRow(p) {
   } }, h("input", { name: "text", placeholder: "+", autocomplete: "off", id: `add-${p.id}` }));
 
   const items = h("div", { class: "items", dataset: { projectId: p.id } }, cards, adder);
-  items.addEventListener("dragover", (e) => onItemDragOver(e, p.id));
-  items.addEventListener("dragleave", clearDropMarks);
-  items.addEventListener("drop", (e) => onItemDrop(e, p.id));
+  if (!isEpic) {
+    items.addEventListener("dragover", (e) => onItemDragOver(e, p.id));
+    items.addEventListener("dragleave", clearDropMarks);
+    items.addEventListener("drop", (e) => onItemDrop(e, p.id));
+  }
 
+  const progress = isEpic ? M.epicProgress(state, p.id) : null;
   const name = h("div", { class: "project", draggable: "true", title: "Drag to reorder. Double-click to rename." },
-    h("span", { class: "grip" }, "⋮⋮"), h("span", { class: "project-name" }, p.name),
-    h("button", { class: "to-top", title: "Send this project to the top", onclick: (e) => {
+    h("span", { class: "grip" }, "⋮⋮"),
+    isEpic ? h("button", { class: "swatch", type: "button", title: "Change the epic color",
+      "aria-label": `Change the color of ${p.name}`, style: `background:${M.EPIC_COLORS[p.color]}`,
+      ondblclick: (e) => e.stopPropagation(),
+      onclick: (e) => { e.stopPropagation(); openPalette(p, e.currentTarget); } }) : null,
+    h("span", { class: "project-title" },
+      h("span", { class: "project-name" }, p.name),
+      isEpic ? h("span", { class: "epic-progress" }, `${progress.done} of ${progress.total} done`) : null),
+    h("button", { class: "to-top", title: `Send this ${noun} to the top`, onclick: (e) => {
       e.stopPropagation();
       if (state.projectOrder[0] !== p.id) emit(ev("project.moved", { projectId: p.id, index: 0 }));
     } }, "⤒"),
-    h("button", { class: "to-bottom", title: "Send this project to the bottom", onclick: (e) => {
+    h("button", { class: "to-bottom", title: `Send this ${noun} to the bottom`, onclick: (e) => {
       e.stopPropagation();
       if (state.projectOrder.at(-1) !== p.id)
         emit(ev("project.moved", { projectId: p.id, index: state.projectOrder.length }));
@@ -230,28 +248,37 @@ function renderRow(p) {
   name.addEventListener("dragstart", (e) => { drag = { kind: "project", id: p.id }; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.name); });
   name.addEventListener("dragend", endDrag);
 
-  const row = h("div", { class: "row", dataset: { projectId: p.id } }, name, items);
+  const row = h("div", { class: isEpic ? "row epic" : "row", dataset: { projectId: p.id } }, name, items);
   row.addEventListener("dragover", (e) => onProjectDragOver(e, row));
   row.addEventListener("drop", (e) => onProjectDrop(e, p.id, row));
   return row;
 }
 
-function renderCard(it, index) {
-  const blockers = M.blockersOf(state, it.id);
-  const blocking = M.blockedBy(state, it.id).filter((b) => b.finishedAt == null);
+// `row` is the project or epic whose row shows this card. Only an epic row can
+// show a finished item or a task that belongs to another project.
+function renderCard(it, index, row) {
+  const finished = it.finishedAt != null;
+  const linked = M.isEpic(row) && it.projectId !== row.id;
+  const due = finished ? null : it.due;
+  const blockers = finished ? [] : M.blockersOf(state, it.id);
+  const blocking = finished ? [] : M.blockedBy(state, it.id).filter((b) => b.finishedAt == null);
   const cls = ["card"];
   if (index === 0) cls.push("first");
+  if (finished) cls.push("done");
   if (blockers.length) cls.push("blocked");
-  if (it.due) cls.push("dated", dueClass(it.due));
+  if (due) cls.push("dated", dueClass(due));
 
-  const card = h("div", { class: cls.join(" "), draggable: "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+  const card = h("div", { class: cls.join(" "), draggable: M.isEpic(row) ? null : "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+    linked ? h("div", { class: "card-project" }, projectName(it.projectId)) : null,
     h("div", { class: "card-text" }, it.text),
-    it.due ? h("div", { class: "badge due" }, M.dueLabel(it.due, today())) : null,
+    due ? h("div", { class: "badge due" }, M.dueLabel(due, today())) : null,
     blockers.length ? h("div", { class: "badge waits" }, "waiting on: ",
       blockers.map((b) => `${projectName(b.projectId)} · ${b.text}`).join("; ")) : null,
     blocking.length ? h("div", { class: "badge blocks" }, `blocks ${blocking.length}`) : null,
-    h("div", { class: "age", title: `open for ${M.ageDays(it, today())} days` }, `${M.ageDays(it, today())}d`),
-    h("button", { class: "finish", title: "Finish", onclick: (e) => { e.stopPropagation(); emit(ev("item.finished", { itemId: it.id })); } }, "✓"),
+    finished ? null : h("div", { class: "age", title: `open for ${M.ageDays(it, today())} days` }, `${M.ageDays(it, today())}d`),
+    finished
+      ? h("button", { class: "reopen", title: "Reopen", onclick: (e) => { e.stopPropagation(); emit(ev("item.reopened", { itemId: it.id })); } }, "Reopen")
+      : h("button", { class: "finish", title: "Finish", onclick: (e) => { e.stopPropagation(); emit(ev("item.finished", { itemId: it.id })); } }, "✓"),
   );
   card.addEventListener("dragstart", (e) => {
     drag = { kind: "item", id: it.id };
@@ -282,7 +309,7 @@ function renderStatus() {
     age.textContent = `last backup: ${days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`}`;
     age.className = `backup-age${days > 7 ? " stale" : ""}`;
   }
-  const counts = `${state.projects.size} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · `;
+  const counts = `${plainProjectCount(state)} projects · ${[...state.items.values()].filter((i) => i.finishedAt == null).length} open items · ${events.length} events · `;
   document.getElementById("status").replaceChildren(counts, persisted
     ? "storage: persistent"
     : h("span", { class: "not-persistent" }, "storage: NOT persistent. Fix: ",
@@ -423,14 +450,45 @@ function onProjectDrop(e, targetId, row) {
 // --- editing ---------------------------------------------------------------
 
 function renameProject(p) {
-  const name = prompt("Project name (leave empty to delete the project)", p.name);
+  const noun = M.isEpic(p) ? "Epic" : "Project";
+  const name = prompt(`${noun} name (leave empty to delete the ${noun.toLowerCase()})`, p.name);
   if (name == null) return;
   if (name.trim() === "") {
-    if (confirm(`Delete project "${p.name}" and its ${p.itemIds.length} open items?`))
-      emit(ev("project.removed", { projectId: p.id }));
+    if (confirm(deleteQuestion(p))) emit(ev("project.removed", { projectId: p.id }));
     return;
   }
   if (name.trim() !== p.name) emit(ev("project.renamed", { projectId: p.id, name }));
+}
+
+function deleteQuestion(p) {
+  if (!M.isEpic(p)) return `Delete project "${p.name}" and its ${p.itemIds.length} open items?`;
+  const own = p.memberIds.filter((id) => state.items.get(id).projectId === p.id).length;
+  const linked = p.memberIds.length - own;
+  return `Delete epic "${p.name}"?\n\n` +
+    `This deletes its ${own} own ${own === 1 ? "task" : "tasks"}, open or finished.\n` +
+    `${linked} linked ${linked === 1 ? "task stays" : "tasks stay"} in ${linked === 1 ? "its project" : "their projects"}.`;
+}
+
+// Any palette color, in palette order. It prefers a color that no epic uses.
+function nextEpicColor() {
+  const uses = (color) => [...state.projects.values()].filter((p) => M.isEpic(p) && p.color === color).length;
+  return Object.keys(M.EPIC_COLORS).reduce((best, color) => (uses(color) < uses(best) ? color : best));
+}
+
+const palette = document.getElementById("palette");
+
+function openPalette(p, anchor) {
+  if (palette.matches(":popover-open")) palette.hidePopover();
+  palette.replaceChildren(...Object.entries(M.EPIC_COLORS).map(([color, hex]) =>
+    h("button", { type: "button", class: color === p.color ? "swatch current" : "swatch", title: color,
+      "aria-label": color, dataset: { color }, style: `background:${hex}`, onclick: () => {
+        palette.hidePopover();
+        if (color !== p.color) emit(ev("epic.colorSet", { projectId: p.id, color }));
+      } })));
+  const r = anchor.getBoundingClientRect();
+  palette.style.left = `${r.left}px`;
+  palette.style.top = `${r.bottom + 4}px`;
+  palette.showPopover();
 }
 
 const dialog = document.getElementById("editor");
@@ -442,6 +500,7 @@ function openEditor(itemId) {
   const it = state.items.get(itemId);
   form.elements.text.value = it.text;
   form.elements.due.value = it.due ?? "";
+  form.querySelector('[data-act="finish"]').hidden = it.finishedAt != null;
   fillBlockLists();
   dialog.returnValue = "";
   dialog.showModal();
@@ -512,6 +571,14 @@ document.getElementById("add-project").addEventListener("submit", (e) => {
   emit(ev("project.added", { projectId: M.newId(), name }));
 });
 
+document.getElementById("add-epic").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = e.target.elements.name.value.trim();
+  if (!name) return;
+  e.target.reset();
+  emit(ev("epic.added", { projectId: M.newId(), name, color: nextEpicColor() }));
+});
+
 const tooltips = document.getElementById("tooltips");
 tooltips.addEventListener("change", () => {
   localStorage.setItem(TOOLTIPS_KEY, tooltips.checked ? "1" : "0");
@@ -552,7 +619,7 @@ restoreFile.addEventListener("change", async () => {
   }
   const s = M.replay(backup.events);
   const msg = `Replace everything in tasket with ${file.name}?\n\n` +
-    `The file has ${s.projects.size} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
+    `The file has ${plainProjectCount(s)} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
     `tasket now has ${events.length} events. They will be lost unless you have a backup.`;
   if (!confirm(msg)) return;
   await replaceEvents(db, backup.events);

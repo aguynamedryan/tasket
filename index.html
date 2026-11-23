@@ -28,10 +28,16 @@
     <div id="error" class="error" hidden></div>
     <section id="dated" class="dated" aria-label="Fixed dates"></section>
     <section id="grid" class="grid" aria-label="Projects"></section>
-    <form id="add-project" class="add-project">
-      <input name="name" placeholder="New project" autocomplete="off">
-      <button>Add project</button>
-    </form>
+    <div class="add-forms">
+      <form id="add-project" class="add-project">
+        <input name="name" placeholder="New project" autocomplete="off">
+        <button>Add project</button>
+      </form>
+      <form id="add-epic" class="add-project">
+        <input name="name" placeholder="New epic" autocomplete="off">
+        <button>Add epic</button>
+      </form>
+    </div>
     <details id="finished" class="finished">
       <summary>Recently finished</summary>
       <ul></ul>
@@ -39,6 +45,8 @@
   </main>
 
   <footer id="status" class="status"></footer>
+
+  <div id="palette" class="palette" popover aria-label="Epic colors"></div>
 
   <dialog id="editor">
     <form method="dialog" class="editor">
