@@ -66,22 +66,21 @@ async function appendEvents(db, newEvents) {
   const store = tx.objectStore(STORE);
   const done = txDone(tx);
   let stale = false;
+  let last;
   store.openKeyCursor(null, "prev").onsuccess = (e) => {
     if (keyOf(e.target.result) !== lastKey) {
       stale = true;
       tx.abort();
       return;
     }
-    let last;
     for (const event of newEvents) last = store.add(event);
-    // Set here, not after commit, so a second emit from this tab passes the check.
-    last.onsuccess = () => { lastKey = last.result; };
   };
   try {
     await done;
   } catch (err) {
     throw stale ? new StaleTabError() : err;
   }
+  lastKey = last.result;
 }
 
 async function replaceEvents(db, newEvents) {
@@ -100,14 +99,28 @@ let db;
 let events = [];
 let state = M.emptyState();
 
+// Run writes one at a time, in call order, so each one validates against the
+// result of the previous one. A failed write does not stop the later writes.
+let writeQueue = Promise.resolve();
+
+function inWriteOrder(write) {
+  const result = writeQueue.then(write);
+  writeQueue = result.catch(() => {});
+  return result;
+}
+
 // Apply first (so a bad event never reaches storage), then store.
+// The catch above marks `result` as handled. This async function returns a new
+// promise, so a failure still reaches the unhandledrejection error box.
 async function emit(...newEvents) {
-  await ready;
-  const next = M.replay([...events, ...newEvents]);
-  await appendEvents(db, newEvents);
-  events.push(...newEvents);
-  state = next;
-  render();
+  await inWriteOrder(async () => {
+    await ready;
+    const next = M.replay([...events, ...newEvents]);
+    await appendEvents(db, newEvents);
+    events.push(...newEvents);
+    state = next;
+    render();
+  });
 }
 
 const ev = (type, payload) => M.makeEvent(type, payload);
@@ -691,10 +704,12 @@ restoreFile.addEventListener("change", async () => {
     `The file has ${plainProjectCount(s)} projects and ${[...s.items.values()].filter((i) => !i.finishedAt).length} open items, from ${backup.exportedAt}.\n` +
     `tasket now has ${events.length} events. They will be lost unless you have a backup.`;
   if (!confirm(msg)) return;
-  await replaceEvents(db, backup.events);
-  events = backup.events;
-  state = s;
-  ready = Promise.resolve(); // edits work again, even if the old log could not replay
+  await inWriteOrder(async () => {
+    await replaceEvents(db, backup.events);
+    events = backup.events;
+    state = s;
+    ready = Promise.resolve(); // edits work again, even if the old log could not replay
+  });
   document.getElementById("error").hidden = true;
   localStorage.setItem(LAST_BACKUP_KEY, backup.exportedAt);
   render();
