@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import * as M from "../model.js";
 
 const e = (type, payload) => M.makeEvent(type, payload, "2026-11-18T12:00:00.000Z");
@@ -125,4 +126,224 @@ test("backup round trip gives the same state; bad files are refused", () => {
   assert.throws(() => M.parseBackup(JSON.stringify({ format: "other" })), /not a tasket backup/);
   assert.throws(() => M.parseBackup(JSON.stringify({ format: M.BACKUP_FORMAT, version: 99, events: [] })), /version 99/);
   assert.throws(() => M.parseBackup(JSON.stringify(M.makeBackup([e("item.edited", { itemId: "q", text: "t" })]))), /unknown item/);
+});
+
+// --- version 1 logs ---------------------------------------------------------
+
+const fixture = (name) => readFileSync(new URL(`fixtures/${name}`, import.meta.url), "utf8");
+const snapshot = (s) => ({
+  projects: [...s.projects.entries()],
+  projectOrder: s.projectOrder,
+  items: [...s.items.entries()],
+  blocks: [...s.blocks.entries()],
+});
+const PRE_EPIC_TYPES = [
+  "project.added", "project.renamed", "project.moved", "project.removed",
+  "item.added", "item.edited", "item.moved", "item.finished", "item.reopened", "item.removed", "item.dueSet",
+  "block.added", "block.removed",
+];
+
+test("the version 1 fixture uses every pre-epic event type", () => {
+  const { events } = JSON.parse(fixture("v1-log.json"));
+  assert.deepEqual(new Set(events.map((ev) => ev.type)), new Set(PRE_EPIC_TYPES));
+  assert.deepEqual(M.EVENT_TYPES.filter((t) => !t.startsWith("epic.")), PRE_EPIC_TYPES);
+});
+
+test("a version 1 backup replays to the state that the pre-epic model produced", () => {
+  const backup = M.parseBackup(fixture("v1-log.json"));
+  assert.equal(backup.version, 1);
+  assert.deepEqual(snapshot(M.replay(backup.events)), JSON.parse(fixture("v1-state.json")));
+});
+
+// --- epics ------------------------------------------------------------------
+
+const epics = () => [
+  ...base(),
+  e("epic.added", { projectId: "E", name: "launch", color: "indigo" }),
+  e("epic.added", { projectId: "F", name: "cleanup", color: "green" }),
+];
+const members = (s, id) => s.projects.get(id).memberIds;
+const link = (projectId, itemId, index) => e("epic.linked", { projectId, itemId, index });
+const ids = (list) => list.map((it) => it.id);
+
+test("epic.added creates an epic row and leaves plain projects unchanged", () => {
+  const s = M.replay([...base(), e("epic.added", { projectId: "E", name: " launch ", color: "violet", index: 1 })]);
+  assert.deepEqual(s.projectOrder, ["A", "E", "B"]);
+  assert.deepEqual(s.projects.get("E"), { id: "E", name: "launch", itemIds: [], kind: "epic", color: "violet", memberIds: [] });
+  assert.deepEqual(Object.keys(s.projects.get("A")), ["id", "name", "itemIds"]);
+  assert.throws(() => M.replay([...base(), e("epic.added", { projectId: "A", name: "x", color: "blue" })]), /duplicate project/);
+  assert.throws(() => M.replay([e("epic.added", { projectId: "E", name: " ", color: "blue" })]), /needs a name/);
+});
+
+test("epic colors must be palette names, with no red or turquoise", () => {
+  assert.deepEqual(Object.keys(M.EPIC_COLORS), ["indigo", "violet", "magenta", "orange", "amber", "green", "blue", "slate"]);
+  for (const color of ["red", "turquoise", "#4f46e5", "constructor", undefined, ["indigo"]]) {
+    assert.throws(() => M.replay([e("epic.added", { projectId: "E", name: "x", color })]), /unknown epic color/);
+  }
+});
+
+test("epic.colorSet changes the color of an epic only", () => {
+  const s = M.replay([...epics(), e("epic.colorSet", { projectId: "E", color: "slate" })]);
+  assert.equal(s.projects.get("E").color, "slate");
+  assert.throws(() => M.replay([...epics(), e("epic.colorSet", { projectId: "A", color: "slate" })]), /not an epic/);
+  assert.throws(() => M.replay([...epics(), e("epic.colorSet", { projectId: "E", color: "red" })]), /unknown epic color/);
+});
+
+test("epic.linked adds a task to several epics and leaves its project alone", () => {
+  const s = M.replay([...epics(), link("E", "a1"), link("E", "b1", 0), link("F", "a1")]);
+  assert.deepEqual(members(s, "E"), ["b1", "a1"]);
+  assert.deepEqual(members(s, "F"), ["a1"]);
+  assert.equal(s.items.get("a1").projectId, "A");
+  assert.deepEqual(order(s, "A"), ["a1", "a2", "a3"]);
+  assert.deepEqual(s.projects.get("E").itemIds, []);
+});
+
+test("epic.linked refuses a non-epic, an unknown item and an existing member", () => {
+  assert.throws(() => M.replay([...epics(), link("A", "b1")]), /not an epic/);
+  assert.throws(() => M.replay([...epics(), link("E", "nope")]), /unknown item/);
+  assert.throws(() => M.replay([...epics(), link("E", "a1"), link("E", "a1")]), /already in this epic/);
+  const own = e("item.added", { itemId: "o1", projectId: "E", text: "own" });
+  assert.throws(() => M.replay([...epics(), own, link("E", "o1")]), /already in this epic/);
+});
+
+test("epic.memberMoved reorders the epic and never changes project priority", () => {
+  const s = M.replay([...epics(), link("E", "a1"), link("E", "a2"), link("E", "a3"),
+    e("epic.memberMoved", { projectId: "E", itemId: "a3", index: 0 })]);
+  assert.deepEqual(members(s, "E"), ["a3", "a1", "a2"]);
+  assert.deepEqual(order(s, "A"), ["a1", "a2", "a3"]);
+  assert.throws(() => M.replay([...epics(), e("epic.memberMoved", { projectId: "A", itemId: "a1", index: 0 })]), /not an epic/);
+  assert.throws(() => M.replay([...epics(), e("epic.memberMoved", { projectId: "E", itemId: "a1", index: 0 })]), /not in this epic/);
+  assert.throws(() => M.replay([...epics(), link("E", "a1"), e("epic.memberMoved", { projectId: "E", itemId: "a1" })]), /bad index/);
+});
+
+test("epic.unlinked removes one membership and refuses the epic's own task", () => {
+  const s = M.replay([...epics(), link("E", "a1"), link("F", "a1"), e("epic.unlinked", { projectId: "E", itemId: "a1" })]);
+  assert.deepEqual(members(s, "E"), []);
+  assert.deepEqual(members(s, "F"), ["a1"]);
+  assert.equal(s.items.get("a1").projectId, "A");
+  assert.throws(() => M.replay([...epics(), e("epic.unlinked", { projectId: "A", itemId: "a1" })]), /not an epic/);
+  assert.throws(() => M.replay([...epics(), e("epic.unlinked", { projectId: "E", itemId: "a1" })]), /not in this epic/);
+  const own = e("item.added", { itemId: "o1", projectId: "E", text: "own" });
+  assert.throws(() => M.replay([...epics(), own, e("epic.unlinked", { projectId: "E", itemId: "o1" })]), /own task/);
+});
+
+test("item.added into an epic makes an own task and a member", () => {
+  const s = M.replay([...epics(), link("E", "a1"),
+    e("item.added", { itemId: "o1", projectId: "E", text: "own" }),
+    e("item.added", { itemId: "o2", projectId: "E", text: "own two", index: 0 })]);
+  assert.deepEqual(members(s, "E"), ["o2", "a1", "o1"]);
+  assert.equal(s.items.get("o1").projectId, "E");
+  assert.deepEqual([...order(s, "E")].sort(), ["o1", "o2"]);
+  assert.equal(M.replay(base()).projects.get("A").memberIds, undefined);
+});
+
+test("item.moved refuses an epic, and an own task moved out becomes a linked task", () => {
+  const own = e("item.added", { itemId: "o1", projectId: "E", text: "own" });
+  assert.throws(() => M.replay([...epics(), e("item.moved", { itemId: "a1", projectId: "E", index: 0 })]), /into an epic/);
+  assert.throws(() => M.replay([...epics(), own, e("item.moved", { itemId: "o1", projectId: "E", index: 0 })]), /into an epic/);
+  const moved = [...epics(), own, e("item.moved", { itemId: "o1", projectId: "A", index: 0 })];
+  let s = M.replay(moved);
+  assert.equal(s.items.get("o1").projectId, "A");
+  assert.deepEqual(order(s, "A"), ["o1", "a1", "a2", "a3"]);
+  assert.deepEqual(order(s, "E"), []);
+  assert.deepEqual(members(s, "E"), ["o1"]);
+  s = M.replay([...moved, e("epic.unlinked", { projectId: "E", itemId: "o1" })]);
+  assert.deepEqual(members(s, "E"), []);
+  assert.equal(s.items.has("o1"), true);
+});
+
+test("removing an item removes it from every epic", () => {
+  const s = M.replay([...epics(), link("E", "a1"), link("F", "a1"), e("item.removed", { itemId: "a1" })]);
+  assert.deepEqual(members(s, "E"), []);
+  assert.deepEqual(members(s, "F"), []);
+  const r = M.replay([...epics(), link("E", "b1"), e("project.removed", { projectId: "B" })]);
+  assert.deepEqual(members(r, "E"), []);
+});
+
+test("project.removed on an epic deletes its own tasks and links, and linked tasks stay", () => {
+  const s = M.replay([...epics(),
+    e("item.added", { itemId: "o1", projectId: "E", text: "own open" }),
+    e("item.added", { itemId: "o2", projectId: "E", text: "own finished" }),
+    e("item.finished", { itemId: "o2" }),
+    link("F", "o1"), link("E", "a1"), link("F", "a1"),
+    e("block.added", { blockerId: "o1", blockedId: "a2" }),
+    e("project.removed", { projectId: "E" })]);
+  assert.equal(s.projects.has("E"), false);
+  assert.deepEqual(s.projectOrder, ["A", "B", "F"]);
+  assert.equal(s.items.has("o1"), false);
+  assert.equal(s.items.has("o2"), false);
+  assert.equal(s.items.get("a1").projectId, "A");
+  assert.deepEqual(order(s, "A"), ["a1", "a2", "a3"]);
+  assert.deepEqual(members(s, "F"), ["a1"]);
+  assert.equal(s.blocks.size, 0);
+});
+
+test("finished tasks stay in the epic, and reopening keeps their place", () => {
+  const events = [...epics(), link("E", "a1"),
+    e("item.added", { itemId: "o1", projectId: "E", text: "own" }), link("E", "a2"),
+    e("item.finished", { itemId: "o1" }), e("item.finished", { itemId: "a1" })];
+  let s = M.replay(events);
+  assert.deepEqual(members(s, "E"), ["a1", "o1", "a2"]);
+  assert.deepEqual(order(s, "E"), []);
+  s = M.replay([...events, e("item.reopened", { itemId: "o1" })]);
+  assert.deepEqual(members(s, "E"), ["a1", "o1", "a2"]);
+  assert.deepEqual(order(s, "E"), ["o1"]);
+});
+
+test("isEpic tells an epic from a plain project", () => {
+  const s = M.replay(epics());
+  assert.equal(M.isEpic(s.projects.get("E")), true);
+  assert.equal(M.isEpic(s.projects.get("A")), false);
+  assert.equal(M.isEpic(undefined), false);
+});
+
+test("epicsOf lists epics in projectOrder order", () => {
+  const events = [...epics(), link("F", "a1"), link("E", "a1")];
+  assert.deepEqual(M.epicsOf(M.replay(events), "a1").map((p) => p.id), ["E", "F"]);
+  const s = M.replay([...events, e("project.moved", { projectId: "F", index: 0 })]);
+  assert.deepEqual(M.epicsOf(s, "a1").map((p) => p.id), ["F", "E"]);
+  assert.deepEqual(M.epicsOf(s, "a2"), []);
+});
+
+test("epicRow splits members into open and finished, each in member order", () => {
+  const s = M.replay([...epics(), link("E", "a3"), link("E", "a1"), link("E", "b1"), link("E", "a2"),
+    e("item.finished", { itemId: "a2" }), e("item.finished", { itemId: "a3" })]);
+  const row = M.epicRow(s, "E");
+  assert.deepEqual(ids(row.open), ["a1", "b1"]);
+  assert.deepEqual(ids(row.finished), ["a3", "a2"]);
+  assert.throws(() => M.epicRow(s, "A"), /not an epic/);
+  assert.throws(() => M.epicRow(s, "nope"), /unknown project/);
+});
+
+test("epicProgress counts finished members", () => {
+  const s = M.replay([...epics(), link("E", "a1"), link("E", "a2"),
+    e("item.added", { itemId: "o1", projectId: "E", text: "own" }), e("item.finished", { itemId: "a2" })]);
+  assert.deepEqual(M.epicProgress(s, "E"), { done: 1, total: 3 });
+  assert.deepEqual(M.epicProgress(s, "F"), { done: 0, total: 0 });
+});
+
+test("cardBorders draws at most 3 borders and counts the rest as hidden", () => {
+  const four = [...base(),
+    e("epic.added", { projectId: "E1", name: "one", color: "indigo" }),
+    e("epic.added", { projectId: "E2", name: "two", color: "green" }),
+    e("epic.added", { projectId: "E3", name: "three", color: "amber" }),
+    e("epic.added", { projectId: "E4", name: "four", color: "slate" }),
+    link("E1", "a1"), link("E2", "a1"), link("E3", "a1"), link("E4", "a1"),
+    link("E1", "a2"), link("E2", "a2"), link("E3", "a2")];
+  let s = M.replay(four);
+  assert.deepEqual(M.cardBorders(s, "b1"), { due: null, colors: [], hidden: 0 });
+  assert.deepEqual(M.cardBorders(s, "a2"), { due: null, colors: ["indigo", "green", "amber"], hidden: 0 });
+  assert.deepEqual(M.cardBorders(s, "a1"), { due: null, colors: ["indigo", "green", "amber"], hidden: 1 });
+  s = M.replay([...four, e("item.dueSet", { itemId: "a2", due: "2026-12-01" })]);
+  assert.deepEqual(M.cardBorders(s, "a2"), { due: "2026-12-01", colors: ["indigo", "green"], hidden: 1 });
+  s = M.replay([...four, e("item.dueSet", { itemId: "a2", due: "2026-12-01" }), e("item.finished", { itemId: "a2" })]);
+  assert.deepEqual(M.cardBorders(s, "a2"), { due: null, colors: ["indigo", "green", "amber"], hidden: 0 });
+  assert.throws(() => M.cardBorders(s, "nope"), /unknown item/);
+});
+
+test("a backup with epic events round-trips at version 1", () => {
+  const events = [...epics(), link("E", "a1"), e("item.added", { itemId: "o1", projectId: "E", text: "own" })];
+  const back = M.parseBackup(JSON.stringify(M.makeBackup(events, "2026-11-18T13:00:00.000Z")));
+  assert.equal(back.version, 1);
+  assert.deepEqual(M.replay(back.events), M.replay(events));
 });

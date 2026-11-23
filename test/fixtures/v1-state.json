@@ -1,0 +1,131 @@
+{
+ "projects": [
+  [
+   "p-alpha",
+   {
+    "id": "p-alpha",
+    "name": "synthetic alpha",
+    "itemIds": [
+     "i-03"
+    ]
+   }
+  ],
+  [
+   "p-beta",
+   {
+    "id": "p-beta",
+    "name": "synthetic beta renamed",
+    "itemIds": [
+     "i-05",
+     "i-02",
+     "i-04"
+    ]
+   }
+  ],
+  [
+   "p-gamma",
+   {
+    "id": "p-gamma",
+    "name": "synthetic gamma",
+    "itemIds": [
+     "i-08"
+    ]
+   }
+  ]
+ ],
+ "projectOrder": [
+  "p-gamma",
+  "p-beta",
+  "p-alpha"
+ ],
+ "items": [
+  [
+   "i-01",
+   {
+    "id": "i-01",
+    "projectId": "p-alpha",
+    "text": "synthetic task one, edited",
+    "addedAt": "2026-01-03T09:00:00.000Z",
+    "due": "2026-01-10",
+    "finishedAt": "2026-01-06T09:00:00.000Z",
+    "finishedIndex": 1
+   }
+  ],
+  [
+   "i-02",
+   {
+    "id": "i-02",
+    "projectId": "p-beta",
+    "text": "synthetic task two",
+    "addedAt": "2026-01-03T09:01:00.000Z",
+    "due": "2026-02-01",
+    "finishedAt": null,
+    "finishedIndex": null
+   }
+  ],
+  [
+   "i-03",
+   {
+    "id": "i-03",
+    "projectId": "p-alpha",
+    "text": "synthetic task three",
+    "addedAt": "2026-01-03T09:02:00.000Z",
+    "due": null,
+    "finishedAt": null,
+    "finishedIndex": null
+   }
+  ],
+  [
+   "i-04",
+   {
+    "id": "i-04",
+    "projectId": "p-beta",
+    "text": "synthetic task four",
+    "addedAt": "2026-01-03T09:03:00.000Z",
+    "due": null,
+    "finishedAt": null,
+    "finishedIndex": null
+   }
+  ],
+  [
+   "i-05",
+   {
+    "id": "i-05",
+    "projectId": "p-beta",
+    "text": "synthetic task five",
+    "addedAt": "2026-01-03T09:04:00.000Z",
+    "due": null,
+    "finishedAt": null,
+    "finishedIndex": null
+   }
+  ],
+  [
+   "i-08",
+   {
+    "id": "i-08",
+    "projectId": "p-gamma",
+    "text": "synthetic task eight",
+    "addedAt": "2026-01-03T09:07:00.000Z",
+    "due": null,
+    "finishedAt": null,
+    "finishedIndex": null
+   }
+  ]
+ ],
+ "blocks": [
+  [
+   "i-02>i-03",
+   {
+    "blockerId": "i-02",
+    "blockedId": "i-03"
+   }
+  ],
+  [
+   "i-05>i-02",
+   {
+    "blockerId": "i-05",
+    "blockedId": "i-02"
+   }
+  ]
+ ]
+}

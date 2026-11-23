@@ -5,12 +5,25 @@
 // An event is { type, at, ...payload }. `at` is an ISO timestamp.
 // State:
 //   projects:     Map projectId -> { id, name, itemIds }   itemIds = open items, in priority order
+//                 An epic is a project record with three more fields:
+//                 { ..., kind: "epic", color, memberIds }  color = a key of EPIC_COLORS
+//                 memberIds = the epic's own tasks and linked tasks, open or finished, in epic order
 //   projectOrder: [projectId]
 //   items:        Map itemId -> { id, projectId, text, addedAt, due, finishedAt, finishedIndex }
 //   blocks:       Map "blockerId>blockedId" -> { blockerId, blockedId }
 
 export const BACKUP_FORMAT = "tasket-backup";
 export const BACKUP_VERSION = 1;
+
+// Events store the color name, so a hex value can change later. There is no
+// red or turquoise, because those two colors signal due dates.
+export const EPIC_COLORS = {
+  indigo: "#4f46e5", violet: "#8b3fd9", magenta: "#c026a3", orange: "#e8710a",
+  amber: "#c99700", green: "#3f9b2f", blue: "#1f77d0", slate: "#5b6472",
+};
+
+// A card has room for 3 nested borders, and a due date uses one of them.
+const MAX_CARD_BORDERS = 3;
 
 export class TasketError extends Error {
   constructor(message, detail = {}) {
@@ -61,12 +74,25 @@ function item(state, id, event) {
   return it;
 }
 
+export const isEpic = (project) => project?.kind === "epic";
+
+function epic(state, id, event) {
+  const p = project(state, id, event);
+  assert(isEpic(p), `${p.name} is not an epic`, { event });
+  return p;
+}
+
+function assertEpicColor(color, event) {
+  assert(typeof color === "string" && Object.hasOwn(EPIC_COLORS, color), `unknown epic color ${color}`, { event });
+}
+
 function dropItem(state, it) {
   if (it.finishedAt == null) removeFrom(state.projects.get(it.projectId).itemIds, it.id);
   state.items.delete(it.id);
   for (const [key, b] of state.blocks) {
     if (b.blockerId === it.id || b.blockedId === it.id) state.blocks.delete(key);
   }
+  for (const p of state.projects.values()) if (isEpic(p)) removeFrom(p.memberIds, it.id);
 }
 
 const handlers = {
@@ -100,6 +126,7 @@ const handlers = {
       due: null, finishedAt: null, finishedIndex: null,
     });
     insertAt(p.itemIds, e.itemId, e.index);
+    if (isEpic(p)) insertAt(p.memberIds, e.itemId, e.index);
   },
   "item.edited"(s, e) {
     assert(typeof e.text === "string" && e.text.trim(), "item needs text", { event: e });
@@ -109,6 +136,7 @@ const handlers = {
     const it = item(s, e.itemId, e);
     assert(it.finishedAt == null, "cannot move a finished item", { event: e });
     const to = project(s, e.projectId, e);
+    assert(!isEpic(to), "cannot move an item into an epic", { event: e });
     removeFrom(s.projects.get(it.projectId).itemIds, it.id);
     it.projectId = to.id;
     insertAt(to.itemIds, it.id, e.index);
@@ -144,6 +172,39 @@ const handlers = {
     const key = blockKey(e.blockerId, e.blockedId);
     assert(s.blocks.has(key), "no such blocker", { event: e });
     s.blocks.delete(key);
+  },
+  "epic.added"(s, e) {
+    assert(!s.projects.has(e.projectId), `duplicate project ${e.projectId}`, { event: e });
+    assert(typeof e.name === "string" && e.name.trim(), "epic needs a name", { event: e });
+    assertEpicColor(e.color, e);
+    s.projects.set(e.projectId, {
+      id: e.projectId, name: e.name.trim(), itemIds: [], kind: "epic", color: e.color, memberIds: [],
+    });
+    insertAt(s.projectOrder, e.projectId, e.index);
+  },
+  "epic.colorSet"(s, e) {
+    const p = epic(s, e.projectId, e);
+    assertEpicColor(e.color, e);
+    p.color = e.color;
+  },
+  "epic.linked"(s, e) {
+    const p = epic(s, e.projectId, e);
+    item(s, e.itemId, e);
+    assert(!p.memberIds.includes(e.itemId), "item is already in this epic", { event: e });
+    insertAt(p.memberIds, e.itemId, e.index);
+  },
+  "epic.memberMoved"(s, e) {
+    const p = epic(s, e.projectId, e);
+    assert(p.memberIds.includes(e.itemId), "item is not in this epic", { event: e });
+    assert(Number.isInteger(e.index), `bad index ${e.index}`, { event: e });
+    removeFrom(p.memberIds, e.itemId);
+    insertAt(p.memberIds, e.itemId, e.index);
+  },
+  "epic.unlinked"(s, e) {
+    const p = epic(s, e.projectId, e);
+    assert(p.memberIds.includes(e.itemId), "item is not in this epic", { event: e });
+    assert(s.items.get(e.itemId).projectId !== p.id, "cannot unlink an epic's own task", { event: e });
+    removeFrom(p.memberIds, e.itemId);
   },
 };
 
@@ -241,6 +302,38 @@ export function recentlyFinished(state, limit = 15) {
     .filter((it) => it.finishedAt != null)
     .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
     .slice(0, limit);
+}
+
+// Epics that contain this item, in projectOrder order.
+export function epicsOf(state, itemId) {
+  return state.projectOrder
+    .map((id) => state.projects.get(id))
+    .filter((p) => isEpic(p) && p.memberIds.includes(itemId));
+}
+
+// The epic's members as items, each list in memberIds order.
+export function epicRow(state, epicId) {
+  const members = epic(state, epicId).memberIds.map((id) => state.items.get(id));
+  return {
+    open: members.filter((it) => it.finishedAt == null),
+    finished: members.filter((it) => it.finishedAt != null),
+  };
+}
+
+export function epicProgress(state, epicId) {
+  const { open, finished } = epicRow(state, epicId);
+  return { done: finished.length, total: open.length + finished.length };
+}
+
+// What a card draws. `due` is the date of an open dated item, else null, which
+// matches datedItems. `colors` are EPIC_COLORS names in epicsOf order. `hidden`
+// counts the epics that have no room for a border.
+export function cardBorders(state, itemId) {
+  const it = item(state, itemId);
+  const due = it.finishedAt == null ? it.due : null;
+  const all = epicsOf(state, itemId).map((p) => p.color);
+  const colors = all.slice(0, MAX_CARD_BORDERS - (due ? 1 : 0));
+  return { due, colors, hidden: all.length - colors.length };
 }
 
 // --- backup files ----------------------------------------------------------
