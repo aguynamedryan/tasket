@@ -518,7 +518,13 @@ function renameProject(p) {
 }
 
 function deleteQuestion(p) {
-  if (!M.isEpic(p)) return `Delete project "${p.name}" and its ${p.itemIds.length} open items?`;
+  if (!M.isEpic(p)) {
+    // Count what project.removed deletes: every item of the project, open or finished.
+    const tasks = [...state.items.values()].filter((it) => it.projectId === p.id);
+    const finished = tasks.filter((it) => it.finishedAt != null).length;
+    const count = (n, word) => `${n} ${word} ${n === 1 ? "task" : "tasks"}`;
+    return `Delete project "${p.name}" and its ${count(tasks.length - finished, "open")} and ${count(finished, "finished")}?`;
+  }
   const own = p.memberIds.filter((id) => state.items.get(id).projectId === p.id).length;
   const linked = p.memberIds.length - own;
   return `Delete epic "${p.name}"?\n\n` +
