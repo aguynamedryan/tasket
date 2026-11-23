@@ -26,25 +26,72 @@ function txDone(tx) {
   });
 }
 
+// The highest IndexedDB key this tab has seen, or null for an empty store.
+// Keys only grow, even after clear(), so a different highest key means that
+// another tab wrote to the log or restored a backup.
+let lastKey = null;
+
+const keyOf = (cursor) => cursor?.primaryKey ?? null;
+
+class StaleTabError extends Error {
+  constructor() {
+    super("tasket changed in another tab. Reload this tab. Your last change was not saved.");
+    this.name = "StaleTabError";
+  }
+}
+
+class UnloadableLogError extends Error {
+  constructor(cause, log) {
+    const index = cause.detail?.index;
+    const where = index == null ? "One event" : `Event ${index + 1} of ${log.length} (${log[index]?.type})`;
+    super(`tasket cannot show your data. ${where} failed: ${cause.message}. ` +
+      "Your events are still stored. Backup and Restore still work.", { cause });
+    this.name = "UnloadableLogError";
+  }
+}
+
 async function loadEvents(db) {
   const tx = db.transaction(STORE, "readonly");
-  const req = tx.objectStore(STORE).getAll(); // key order = append order
+  const store = tx.objectStore(STORE);
+  const all = store.getAll(); // key order = append order
+  const head = store.openKeyCursor(null, "prev");
   await txDone(tx);
-  return req.result;
+  return { events: all.result, lastKey: keyOf(head.result) };
 }
 
-async function appendEvents(db, events) {
+// Check and add in one transaction, so no other tab can write between them.
+// The adds run in the cursor's success handler to keep the transaction active.
+async function appendEvents(db, newEvents) {
   const tx = db.transaction(STORE, "readwrite");
-  for (const e of events) tx.objectStore(STORE).add(e);
-  await txDone(tx);
+  const store = tx.objectStore(STORE);
+  const done = txDone(tx);
+  let stale = false;
+  store.openKeyCursor(null, "prev").onsuccess = (e) => {
+    if (keyOf(e.target.result) !== lastKey) {
+      stale = true;
+      tx.abort();
+      return;
+    }
+    let last;
+    for (const event of newEvents) last = store.add(event);
+    // Set here, not after commit, so a second emit from this tab passes the check.
+    last.onsuccess = () => { lastKey = last.result; };
+  };
+  try {
+    await done;
+  } catch (err) {
+    throw stale ? new StaleTabError() : err;
+  }
 }
 
-async function replaceEvents(db, events) {
+async function replaceEvents(db, newEvents) {
   const tx = db.transaction(STORE, "readwrite");
   const store = tx.objectStore(STORE);
   store.clear();
-  for (const e of events) store.add(e);
+  for (const e of newEvents) store.add(e);
+  const head = store.openKeyCursor(null, "prev");
   await txDone(tx);
+  lastKey = keyOf(head.result);
 }
 
 // --- app state -------------------------------------------------------------
@@ -495,7 +542,7 @@ restoreFile.addEventListener("change", async () => {
   const file = restoreFile.files[0];
   restoreFile.value = "";
   if (!file) return;
-  await ready; // the database may still be opening
+  await dbReady; // not `ready`: Restore must work when the stored log cannot replay
   let backup;
   try {
     backup = M.parseBackup(await file.text());
@@ -511,22 +558,35 @@ restoreFile.addEventListener("change", async () => {
   await replaceEvents(db, backup.events);
   events = backup.events;
   state = s;
+  ready = Promise.resolve(); // edits work again, even if the old log could not replay
+  document.getElementById("error").hidden = true;
   localStorage.setItem(LAST_BACKUP_KEY, backup.exportedAt);
   render();
 });
 
 // --- start -----------------------------------------------------------------
 
-async function start() {
+async function openAndLoad() {
   persisted = (await navigator.storage?.persist?.()) ?? false;
   db = await openDb();
-  events = await loadEvents(db);
-  state = M.replay(events);
+  ({ events, lastKey } = await loadEvents(db));
+}
+
+async function replayLog() {
+  await dbReady;
   hideEmpty.checked = localStorage.getItem(HIDE_EMPTY_KEY) === "1";
   tooltips.checked = localStorage.getItem(TOOLTIPS_KEY) !== "0";
+  try {
+    state = M.replay(events);
+  } catch (err) {
+    render(); // the header and the status line still work on the empty state
+    throw new UnloadableLogError(err, events);
+  }
   render();
 }
 
-// Everything that touches the database waits for this.
-const ready = start();
+// Restore waits for dbReady: the database is open and the events are loaded.
+// Edits wait for ready: the events also replayed without an error.
+const dbReady = openAndLoad();
+let ready = replayLog();
 ready.catch(showError);
