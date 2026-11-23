@@ -4,9 +4,10 @@
   --ink: #1d1d1b;
   --muted: #74746c;
   --line: #deded6;
-  --accent: #0e9c92;      /* the one turquoise, same as the icon */
-  --accent-soft: #e2f4f2; /* drop targets: a light tint of the same turquoise */
-  --accent-hover: #f0f9f8;
+  --accent: #08e8de;      /* the one turquoise, same as the icon */
+  --on-accent: var(--ink); /* text on turquoise; white and turquoise text are unreadable at this brightness */
+  --accent-soft: #dafbfa; /* drop targets: a light tint of the same turquoise */
+  --accent-hover: #ecfdfc;
   --overdue: #b3001b;     /* red stays: it is the "act now" signal */
   --today: #d1281f;
   --tomorrow: var(--accent); /* every other due date uses the one turquoise */
@@ -33,9 +34,9 @@ h1 img { width: 1.6rem; height: 1.6rem; }
 main { padding: 0.8rem 1rem 2rem; }
 button { font: inherit; padding: 0.25rem 0.6rem; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); cursor: pointer; }
 button:hover { border-color: var(--muted); }
-button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.danger { color: var(--overdue); }
-button.link { border: none; background: none; color: var(--accent); padding: 0; font-size: 0.9em; }
+button.link { border: none; background: none; color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 2px; padding: 0; font-size: 0.9em; }
 input, textarea, select { font: inherit; }
 
 .error { background: #fde8e8; color: var(--overdue); border: 1px solid var(--overdue); padding: 0.5rem 0.8rem; border-radius: 6px; margin-bottom: 0.8rem; white-space: pre-wrap; }
@@ -51,9 +52,9 @@ section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem
 .dated-blocked { font-size: 0.8rem; background: rgb(0 0 0 / 0.25); padding: 0 0.4rem; border-radius: 4px; }
 .dated-item.due-overdue { background: var(--overdue); }
 .dated-item.due-today { background: var(--today); }
-.dated-item.due-tomorrow { background: var(--tomorrow); }
-.dated-item.due-week { background: var(--week); }
-.dated-item.due-later { background: var(--later); }
+.dated-item.due-tomorrow { background: var(--tomorrow); color: var(--on-accent); }
+.dated-item.due-week { background: var(--week); color: var(--on-accent); }
+.dated-item.due-later { background: var(--later); color: var(--on-accent); }
 
 /* The grid: one row per project, one fixed-width cell per item, so the
    vertical lines line up down the page like spreadsheet columns. */
@@ -81,7 +82,7 @@ section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem
 .to-top, .to-bottom { top: 0.35rem; }
 .to-top { right: 1.6rem; }
 .project:hover .to-top, .project:hover .to-bottom { visibility: visible; }
-.to-top:hover, .to-bottom:hover { color: var(--accent) !important; }
+.to-top:hover, .to-bottom:hover { color: var(--on-accent) !important; background: var(--accent); }
 .items {
   display: flex; flex-wrap: nowrap; align-items: stretch; min-height: 2.2rem;
   background-image: repeating-linear-gradient(to right,
@@ -119,10 +120,10 @@ section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem
 .card.drop-refused { outline: 2px dashed var(--overdue); outline-offset: -3px; }
 .card.drop-block::after, .card.drop-refused::after {
   content: attr(data-drop-label); position: absolute; left: 50%; bottom: 0.1rem; transform: translateX(-50%);
-  font-size: 0.72rem; font-weight: 700; color: white; background: var(--accent);
+  font-size: 0.72rem; font-weight: 700; color: var(--on-accent); background: var(--accent);
   padding: 0.05rem 0.4rem; border-radius: 4px; white-space: nowrap; pointer-events: none;
 }
-.card.drop-refused::after { background: var(--overdue); }
+.card.drop-refused::after { color: white; background: var(--overdue); }
 .items.drop-refused { position: relative; outline: 2px dashed var(--overdue); outline-offset: -3px; }
 .items.drop-refused::after {
   content: attr(data-drop-label); position: absolute; left: 0.5rem; bottom: 0.1rem;
@@ -141,19 +142,19 @@ section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem
 .card.dated.due-tomorrow { --due-color: var(--tomorrow); }
 .card.dated.due-week { --due-color: var(--week); }
 .badge { margin-top: 0.3rem; font-size: 0.78rem; font-weight: 600; }
-.badge.due { color: white; display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px; background: var(--later); }
-.due-overdue .badge.due, .due-today .badge.due { background: var(--today); }
+.badge.due { color: var(--on-accent); display: inline-block; padding: 0.05rem 0.4rem; border-radius: 4px; background: var(--later); }
+.due-overdue .badge.due, .due-today .badge.due { color: white; background: var(--today); }
 .due-tomorrow .badge.due { background: var(--tomorrow); }
 .due-week .badge.due { background: var(--week); }
 .badge.more-epics { display: inline-block; margin-left: 0.25rem; padding: 0.05rem 0.3rem; border-radius: 4px; color: white; background: var(--muted); }
-.badge.waits { color: var(--accent); font-weight: 500; }
-.badge.blocks { color: var(--accent); }
+.badge.waits { color: var(--ink); font-weight: 500; border-left: 3px solid var(--accent); padding-left: 0.35rem; }
+.badge.blocks { color: var(--ink); border-left: 3px solid var(--accent); padding-left: 0.35rem; }
 .finish {
   position: absolute; top: 0.25rem; right: 0.25rem; padding: 0 0.3rem; font-size: 0.85rem;
   border: none; background: none; color: var(--line);
 }
 .card:hover .finish { color: var(--muted); }
-.finish:hover { color: var(--accent) !important; }
+.finish:hover { color: var(--on-accent) !important; background: var(--accent); border-radius: 3px; }
 .unlink {
   position: absolute; bottom: 0.15rem; right: 0.25rem; padding: 0 0.3rem; font-size: 0.95rem; line-height: 1.1;
   border: none; background: none; color: var(--muted); visibility: hidden;
@@ -180,7 +181,7 @@ section.dated { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem
 
 .status { padding: 0.5rem 1rem; color: var(--muted); font-size: 0.85em; border-top: 1px solid var(--line); }
 .status .not-persistent { color: var(--overdue); }
-.status a { color: var(--accent); }
+.status a { color: var(--ink); text-decoration: underline 2px var(--accent); text-underline-offset: 2px; }
 
 dialog { border: 1px solid var(--line); border-radius: 10px; padding: 1rem; width: min(34rem, 92vw); }
 dialog::backdrop { background: rgb(0 0 0 / 0.3); }
