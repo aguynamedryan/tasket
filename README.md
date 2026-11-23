@@ -11,6 +11,17 @@ A basket of tasks. A small to-do list that runs entirely in your browser.
 
 Click an item to edit its text, set a due date, or add a blocker. Double-click a project name to rename it. Drag it to reorder the projects, or hover over it and click ⤒ or ⤓ to send it to the top or the bottom.
 
+## Epics
+
+An epic is a row that collects related tasks from any project. Add one with **Add epic** below the grid.
+
+- **Rows.** An epic row shows its open tasks, then its finished tasks, dimmed, with a **Reopen** button. The row header counts progress, such as "7 of 12 done". A long epic wraps onto more lines. Rename, delete and reorder an epic in the same way as a project.
+- **Aliases.** Drag a task from a project into an epic row to add a linked copy, called an alias. The task stays in its project with the same priority, and the alias shows the project name. Reordering the epic does not change the project. Hover over an alias and click × to remove it from the epic. A task that you type into the epic's + cell belongs to the epic and has no project. Drag it to a project row to give it one, and it stays in the epic as an alias. You cannot drag an alias into a project row.
+- **Colors.** Each epic has a color. Click the swatch in its header to change it. A task in an epic has a border in that color, on every card that shows the task. A due date stays the innermost border, so a dated task keeps its due color.
+- **Multiple epics.** A task can be in several epics. Drag it to another epic row, or use **Add to an epic** in the item editor. A card has room for 3 borders. A "+1" badge counts any epics that do not fit.
+
+Deleting an epic also deletes the tasks that belong to it. Linked tasks stay in their projects.
+
 ## Your data
 
 Your data never leaves your browser. tasket stores a log of events in the browser's IndexedDB, under the address the app is served from. A different browser, browser profile or address starts empty.

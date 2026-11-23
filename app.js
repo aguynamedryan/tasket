@@ -252,12 +252,25 @@ function renderRow(p) {
   return row;
 }
 
+// One stacked inset box-shadow. The first shadow paints on top, so it is the
+// outermost border. Each later shadow shows only as a ring inside the one
+// before it. The due color is last, so it is the innermost border.
+const BORDER_PX = 2;
+
+function borderShadow({ due, colors }) {
+  const layers = colors.map((color) => M.EPIC_COLORS[color]);
+  if (due) layers.push("var(--due-color)");
+  return layers.map((color, i) => `inset 0 0 0 ${(i + 1) * BORDER_PX}px ${color}`).join(", ");
+}
+
 // `row` is the project or epic whose row shows this card. Only an epic row can
 // show a finished item or a task that belongs to another project.
 function renderCard(it, index, row) {
   const finished = it.finishedAt != null;
   const linked = M.isEpic(row) && it.projectId !== row.id;
-  const due = finished ? null : it.due;
+  const borders = M.cardBorders(state, it.id);
+  const due = borders.due;
+  const shadow = borderShadow(borders);
   const blockers = finished ? [] : M.blockersOf(state, it.id);
   const blocking = finished ? [] : M.blockedBy(state, it.id).filter((b) => b.finishedAt == null);
   const cls = ["card"];
@@ -266,10 +279,12 @@ function renderCard(it, index, row) {
   if (blockers.length) cls.push("blocked");
   if (due) cls.push("dated", dueClass(due));
 
-  const card = h("div", { class: cls.join(" "), draggable: finished ? null : "true", dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
+  const card = h("div", { class: cls.join(" "), draggable: finished ? null : "true", style: shadow ? `box-shadow:${shadow}` : null, dataset: { itemId: it.id }, onclick: () => openEditor(it.id) },
     linked ? h("div", { class: "card-project" }, projectName(it.projectId)) : null,
     h("div", { class: "card-text" }, it.text),
     due ? h("div", { class: "badge due" }, M.dueLabel(due, today())) : null,
+    borders.hidden > 0 ? h("div", { class: "badge more-epics",
+      title: `Also in ${M.epicsOf(state, it.id).slice(borders.colors.length).map((p) => p.name).join(", ")}` }, `+${borders.hidden}`) : null,
     blockers.length ? h("div", { class: "badge waits" }, "waiting on: ",
       blockers.map((b) => `${projectName(b.projectId)} · ${b.text}`).join("; ")) : null,
     blocking.length ? h("div", { class: "badge blocks" }, `blocks ${blocking.length}`) : null,
@@ -531,6 +546,7 @@ function openEditor(itemId) {
   form.elements.due.value = it.due ?? "";
   form.querySelector('[data-act="finish"]').hidden = it.finishedAt != null;
   fillBlockLists();
+  fillEpicList();
   dialog.returnValue = "";
   dialog.showModal();
 }
@@ -559,6 +575,30 @@ function fillBlockLists() {
   }
   select.replaceChildren(...options);
 }
+
+function fillEpicList() {
+  const it = state.items.get(editingId);
+  form.querySelector('[data-list="epics"]').replaceChildren(...M.epicsOf(state, it.id).map((p) =>
+    h("li", { dataset: { epicId: p.id } },
+      h("span", { class: "swatch", style: `background:${M.EPIC_COLORS[p.color]}` }), `${p.name} `,
+      it.projectId === p.id
+        ? h("span", { class: "epic-own" }, "(this task belongs to this epic)")
+        : h("button", { type: "button", class: "link", onclick: () =>
+            emit(ev("epic.unlinked", { projectId: p.id, itemId: it.id })).then(fillEpicList) }, "remove"))));
+
+  const others = state.projectOrder.map((id) => state.projects.get(id))
+    .filter((p) => M.isEpic(p) && !p.memberIds.includes(it.id));
+  const select = form.elements["add-epic"];
+  select.replaceChildren(h("option", { value: "" }, others.length ? "— choose an epic —" : "— no other epics —"),
+    ...others.map((p) => h("option", { value: p.id }, p.name)));
+  select.disabled = others.length === 0;
+}
+
+form.elements["add-epic"].addEventListener("change", (e) => {
+  const projectId = e.target.value;
+  if (!projectId) return;
+  emit(ev("epic.linked", { projectId, itemId: editingId })).then(fillEpicList);
+});
 
 form.elements["add-blocker"].addEventListener("change", (e) => {
   const blockerId = e.target.value;
